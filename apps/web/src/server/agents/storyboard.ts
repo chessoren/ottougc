@@ -2,7 +2,7 @@ import "server-only";
 
 import { GoogleGenAI } from "@google/genai";
 
-import { env } from "@/lib/env";
+import { env, googleCredentials } from "@/lib/env";
 import {
   PANEL_VERDICT_SCHEMA,
   compilePanel,
@@ -208,7 +208,7 @@ function vision(): GoogleGenAI {
       vertexai: true,
       project: env.gcpProjectId!,
       location: "global",
-      googleAuthOptions: { credentials: env.gcpServiceAccount as never },
+      googleAuthOptions: googleCredentials(),
     });
   }
   return visionClient;

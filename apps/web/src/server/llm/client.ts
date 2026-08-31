@@ -2,7 +2,7 @@ import "server-only";
 
 import { GoogleGenAI, type FunctionDeclaration } from "@google/genai";
 
-import { env, capabilities } from "@/lib/env";
+import { env, capabilities, googleCredentials } from "@/lib/env";
 
 /**
  * One narrow interface over the model, so the agent runtime never touches a
@@ -116,7 +116,7 @@ function client(): GoogleGenAI {
       vertexai: true,
       project: env.gcpProjectId,
       location: env.gcpGeminiLocation,
-      googleAuthOptions: { credentials: env.gcpServiceAccount as never },
+      googleAuthOptions: googleCredentials(),
     });
   } else if (env.geminiApiKey) {
     cachedClient = new GoogleGenAI({ apiKey: env.geminiApiKey });

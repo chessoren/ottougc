@@ -62,6 +62,10 @@ export interface CompanyBrief {
   vocabulary: string[];
   /** What a visitor arriving from a video is offered. */
   offer: BriefField;
+  /** The one line the site leads with, in the site's own words. */
+  headline: BriefField;
+  /** What it costs, as the site states it. Never inferred. */
+  pricing: BriefField;
   /** Things the agents must never say. */
   forbidden: string[];
   /** What the site could not tell us, phrased as questions to ask. */
@@ -86,6 +90,19 @@ export interface BriefGap {
   why: string;
   kind: "choice" | "short" | "long";
   choices?: string[];
+  /**
+   * The model's own answer, from the site, pre-filled in the field.
+   *
+   * A question is not the same thing as a blank. Reading the whole site and then
+   * handing back an empty text box is asking the founder to do the work twice —
+   * they wrote the site. So the model answers its own questions from what it
+   * read, the answer arrives in the box already, and the founder's job is to
+   * correct it or press enter. That is the difference between an onboarding that
+   * finishes and one that does not.
+   */
+  suggestion?: string;
+  /** Where in the site the suggestion came from, so it can be judged. */
+  suggestionSource?: string;
   /** Blocks completion. Kept to a handful. */
   required: boolean;
 }
@@ -99,6 +116,13 @@ language and into the way a customer would actually describe their day.
 
 RULES
 - Write in English, plain and spoken. Second person where natural.
+- ANSWER YOUR OWN QUESTIONS. Every gap you raise must carry a "suggestion": your
+  best answer, from what you read. You have just read the whole site; handing
+  back an empty box asks the founder to do work they already did. A wrong guess
+  they correct in three seconds is worth more than a blank they have to fill.
+- "headline" is the site's leading line quoted as written. "pricing" is what it
+  costs, exactly as stated, or empty if the site never says. Never estimate a
+  price.
 - Every field is one short sentence. No adjectives that could apply to any
   company ("powerful", "seamless", "innovative").
 - "chore" must be a MOMENT, not a category. Not "saves time on reporting" but
@@ -136,6 +160,15 @@ const SCHEMA = {
     objections: { type: "array", items: { type: "string" } },
     vocabulary: { type: "array", items: { type: "string" } },
     offer: { type: "string" },
+    headline: {
+      type: "string",
+      description: "The site's own leading line, quoted as written. Not your paraphrase of it.",
+    },
+    pricing: {
+      type: "string",
+      description:
+        "What it costs, exactly as the site states it — '$29/month, 14-day trial'. Empty string if the site never says. Never estimate a price.",
+    },
     forbidden: { type: "array", items: { type: "string" } },
     gaps: {
       type: "array",
@@ -147,8 +180,17 @@ const SCHEMA = {
           why: { type: "string" },
           kind: { type: "string", enum: ["choice", "short", "long"] },
           choices: { type: "array", items: { type: "string" } },
+          suggestion: {
+            type: "string",
+            description:
+              "YOUR OWN ANSWER to this question, drawn from the site. Required. Never leave it empty: a best guess the founder can correct in three seconds beats a blank box every time. For a 'choice' question it must be one of the choices, word for word.",
+          },
+          suggestionSource: {
+            type: "string",
+            description: "Where on the site you got it — 'pricing page', 'home hero', or 'inferred' when you reasoned it out.",
+          },
         },
-        required: ["id", "question", "why", "kind"],
+        required: ["id", "question", "why", "kind", "suggestion"],
       },
     },
   },
@@ -342,6 +384,18 @@ function assemble(
     chore: field(str("chore"), "home page", shallow.chore),
     oldWay: field(str("oldWay"), "home page", shallow.oldWay),
     reliefMoment: field(str("reliefMoment"), "home page", shallow.reliefMoment),
+    headline: field(str("headline"), "home page", tagline),
+    // Pricing is quoted, never guessed: a price the agents invent is the fastest
+    // way to a complaint, and the crawler already reads the pricing page.
+    pricing: field(
+      str("pricing"),
+      crawl.pages.find((p) => p.kind === "PRICING")?.url ?? "home page",
+      crawl.pages
+        .find((p) => p.kind === "PRICING")
+        ?.figures.filter((f) => /[$€£]/.test(f))
+        .slice(0, 3)
+        .join(" · ") ?? "",
+    ),
     claims,
     objections: arr("objections").length ? arr("objections").slice(0, 6) : shallow.objections,
     vocabulary: arr("vocabulary").slice(0, 10),

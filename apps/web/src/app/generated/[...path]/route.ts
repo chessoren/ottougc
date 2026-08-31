@@ -3,6 +3,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 
 import { GENERATED_ROOT } from "@/lib/paths";
+import { openGenerated } from "@/server/media/durable";
 
 /**
  * Serve generated media.
@@ -13,6 +14,12 @@ import { GENERATED_ROOT } from "@/lib/paths";
  *
  * Range requests are honoured because the dashboard plays these MP4s inline, and
  * a browser cannot scrub a video the server will only send whole.
+ *
+ * When the local file is gone — which on Cloud Run it will be, because the
+ * filesystem lives in memory and the instance scales to zero after each run —
+ * the same path is served from Cloud Storage instead. Range requests fall back
+ * to a whole-file response there: a scrubbable video is better than a 404, and
+ * these files are small enough that it does not matter.
  */
 
 const MIME: Record<string, string> = {
@@ -45,7 +52,18 @@ export async function GET(
   try {
     stat = statSync(target);
   } catch {
-    return new Response("Introuvable", { status: 404 });
+    // Not on this instance's disk. It may still exist in the bucket.
+    const durable = await openGenerated(segments.join("/"));
+    if (!durable) return new Response("Introuvable", { status: 404 });
+    return new Response(Readable.toWeb(durable.stream as Readable) as ReadableStream, {
+      headers: {
+        "Content-Type":
+          MIME[path.extname(target).toLowerCase()] ?? "application/octet-stream",
+        ...(durable.size ? { "Content-Length": String(durable.size) } : {}),
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Served-From": durable.source,
+      },
+    });
   }
   if (!stat.isFile()) return new Response("Introuvable", { status: 404 });
 

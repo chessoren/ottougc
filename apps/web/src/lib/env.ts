@@ -99,6 +99,21 @@ function resolveServiceAccount(): Record<string, unknown> | undefined {
 
 const serviceAccount = resolveServiceAccount();
 
+/**
+ * True when Google libraries can authenticate, one way or another.
+ *
+ * On a laptop that means an explicit service-account key. On Cloud Run it means
+ * the runtime service account, which the client libraries pick up from the
+ * metadata server without any key existing anywhere — which is the point: a
+ * private key in an environment variable is a private key in every log, every
+ * deployment revision and every `gcloud run services describe`.
+ *
+ * `K_SERVICE` is set by Cloud Run and by nothing else.
+ */
+const onGoogleCompute = Boolean(process.env.K_SERVICE || process.env.CLOUD_RUN_JOB);
+const hasGoogleCredentials =
+  Boolean(serviceAccount) || onGoogleCompute || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   isProd: process.env.NODE_ENV === "production",
@@ -125,6 +140,9 @@ export const env = {
    */
   gcpGeminiLocation: str("GOOGLE_CLOUD_GEMINI_LOCATION") ?? "global",
   gcpServiceAccount: serviceAccount,
+  /** Ambient credentials are available even with no key on disk. */
+  gcpAuthAvailable: hasGoogleCredentials,
+  onGoogleCompute,
   gcpServiceAccountPath: str("GOOGLE_APPLICATION_CREDENTIALS"),
   gcsBucket: str("GCS_BUCKET"),
 
@@ -195,38 +213,48 @@ export const env = {
   forceMockMedia: bool("FORCE_MOCK_MEDIA", false),
 } as const;
 
+/**
+ * Credentials for a Google client library, or nothing at all.
+ *
+ * Returning `undefined` is the correct answer on Cloud Run: the libraries then
+ * ask the metadata server for the runtime service account's token, which is
+ * both simpler and safer than shipping a key. Passing `credentials: undefined`
+ * explicitly would not work — the option has to be absent.
+ */
+export function googleCredentials(): { credentials: Record<string, unknown> } | undefined {
+  return env.gcpServiceAccount ? { credentials: env.gcpServiceAccount } : undefined;
+}
+
 /** A single readable answer to "what is actually wired up right now?". */
 export const capabilities = {
   get database() {
     return { configured: Boolean(env.databaseUrl), driver: env.databaseUrl ? "postgres" : "pglite" };
   },
   get llm() {
+    const vertex = Boolean(env.gcpAuthAvailable && env.gcpProjectId);
     return {
-      configured: Boolean(env.geminiApiKey || (env.gcpServiceAccount && env.gcpProjectId)),
-      via: env.gcpServiceAccount && env.gcpProjectId ? "vertex" : env.geminiApiKey ? "ai-studio" : "mock",
+      configured: vertex || Boolean(env.geminiApiKey),
+      via: vertex ? "vertex" : env.geminiApiKey ? "ai-studio" : "mock",
     };
   },
   get video() {
     return {
-      configured:
-        !env.forceMockMedia &&
-        Boolean(env.gcpServiceAccount && env.gcpProjectId),
+      configured: !env.forceMockMedia && Boolean(env.gcpAuthAvailable && env.gcpProjectId),
     };
   },
   get image() {
     return {
-      configured:
-        !env.forceMockMedia && Boolean(env.geminiApiKey || (env.gcpServiceAccount && env.gcpProjectId)),
+      configured: !env.forceMockMedia && Boolean(env.gcpAuthAvailable && env.gcpProjectId),
     };
   },
   get music() {
-    return { configured: !env.forceMockMedia && Boolean(env.gcpServiceAccount && env.gcpProjectId) };
+    return { configured: !env.forceMockMedia && Boolean(env.gcpAuthAvailable && env.gcpProjectId) };
   },
   get tts() {
-    return { configured: !env.forceMockMedia && Boolean(env.gcpServiceAccount || env.gcpServiceAccountPath) };
+    return { configured: !env.forceMockMedia && env.gcpAuthAvailable };
   },
   get storage() {
-    return { configured: Boolean(env.gcsBucket && (env.gcpServiceAccount || env.gcpServiceAccountPath)) };
+    return { configured: Boolean(env.gcsBucket && env.gcpAuthAvailable) };
   },
   get youtube() {
     return {

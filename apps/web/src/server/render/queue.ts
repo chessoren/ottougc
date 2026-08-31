@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import { env } from "@/lib/env";
 import { GENERATED_ROOT } from "@/lib/paths";
 import { db } from "@/server/db";
-import { posts, renderJobs } from "@/server/db/schema";
+import { postAssets, posts, renderJobs } from "@/server/db/schema";
 import type { Timeline } from "@/server/edit/timeline";
 
 /**
@@ -159,6 +159,22 @@ export async function executeRender(jobId: string): Promise<void> {
 
     const publicUrl = `/generated/videos/${job.postId}.mp4`;
     const durationMs = Date.now() - started;
+
+    // Copy the finished video somewhere it survives this container.
+    //
+    // On Cloud Run the filesystem is in memory and the instance scales to zero
+    // a few minutes after the daily run ends, so a video that only exists on
+    // disk exists until lunchtime. The storyboard panels go too: they are what
+    // the dashboard shows to explain how the video was arrived at.
+    const { keepDurable } = await import("@/server/media/durable");
+    await keepDurable(publicUrl);
+    const panels = await db
+      .select({ url: postAssets.url })
+      .from(postAssets)
+      .where(eq(postAssets.postId, job.postId));
+    for (const panel of panels) {
+      if (panel.url?.startsWith("/generated/images/")) await keepDurable(panel.url);
+    }
 
     await db
       .update(renderJobs)

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { GoogleGenAI } from "@google/genai";
 
-import { env } from "@/lib/env";
+import { env, googleCredentials } from "@/lib/env";
 import { GENERATED_ROOT } from "@/lib/paths";
 
 import type { ImageRequest, MediaAsset } from "../types";
@@ -64,7 +64,7 @@ function client(): GoogleGenAI {
       vertexai: true,
       project: env.gcpProjectId!,
       location: "global",
-      googleAuthOptions: { credentials: env.gcpServiceAccount as never },
+      googleAuthOptions: googleCredentials(),
     });
   }
   return cached;

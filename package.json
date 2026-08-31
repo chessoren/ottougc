@@ -18,8 +18,7 @@
     "db:studio": "pnpm --filter @ottougc/web db:studio",
     "db:seed": "pnpm --filter @ottougc/web db:seed",
     "video:studio": "pnpm --filter @ottougc/video studio",
-    "desktop": "pnpm --filter @ottougc/web build && pnpm --filter @ottougc/desktop start",
-    "desktop:dev": "pnpm --filter @ottougc/desktop start",
-    "video:sfx": "pnpm --filter @ottougc/video sfx"
+    "video:sfx": "pnpm --filter @ottougc/video sfx",
+    "deploy": "./scripts/deploy.sh"
   }
 }

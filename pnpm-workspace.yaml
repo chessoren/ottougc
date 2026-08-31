@@ -4,4 +4,3 @@ onlyBuiltDependencies:
   - esbuild
   - protobufjs
   - "@google/genai"
-  - electron

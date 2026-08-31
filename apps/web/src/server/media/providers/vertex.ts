@@ -5,7 +5,7 @@ import path from "node:path";
 import { GoogleGenAI } from "@google/genai";
 import { GoogleAuth } from "google-auth-library";
 
-import { env } from "@/lib/env";
+import { env, googleCredentials } from "@/lib/env";
 import { GENERATED_ROOT } from "@/lib/paths";
 
 import { estimateAlignment } from "./mock";
@@ -56,9 +56,7 @@ function genai(): GoogleGenAI {
       vertexai: true,
       project: env.gcpProjectId!,
       location: env.gcpLocation,
-      googleAuthOptions: env.gcpServiceAccount
-        ? { credentials: env.gcpServiceAccount as never }
-        : undefined,
+      googleAuthOptions: googleCredentials(),
     });
   }
   return ai;
@@ -68,7 +66,7 @@ function googleAuth(): GoogleAuth {
   if (!auth) {
     auth = new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-      credentials: env.gcpServiceAccount as never,
+      ...googleCredentials(),
     });
   }
   return auth;
@@ -251,7 +249,7 @@ export class VertexMediaProvider implements MediaProvider {
   async synthesizeSpeech(req: SpeechRequest): Promise<SpeechAsset> {
     const { TextToSpeechClient } = await import("@google-cloud/text-to-speech");
     const client = new TextToSpeechClient({
-      credentials: env.gcpServiceAccount as never,
+      ...googleCredentials(),
       projectId: env.gcpProjectId,
     });
 
@@ -304,7 +302,7 @@ export class VertexMediaProvider implements MediaProvider {
     const { SpeechClient } = await import("@google-cloud/speech");
     const { readFile } = await import("node:fs/promises");
     const client = new SpeechClient({
-      credentials: env.gcpServiceAccount as never,
+      ...googleCredentials(),
       projectId: env.gcpProjectId,
     });
 

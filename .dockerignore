@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+.next
+**/.next
+.git
+.pglite
+**/.pglite
+**/.pglite-*
+apps/video/public/generated
+apps/web/.env.local
+**/.gcp-service-account.json
+*.log
+.DS_Store
+docs/submission

@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { extractAudio } from "@remotion/renderer";
 
-import { capabilities, env } from "@/lib/env";
+import { capabilities, env, googleCredentials } from "@/lib/env";
 import { GENERATED_ROOT } from "@/lib/paths";
 
 import { estimateAlignment } from "./providers/mock";
@@ -83,7 +83,7 @@ export async function transcribeClip(
     const { SpeechClient } = await import("@google-cloud/speech");
     const { readFile } = await import("node:fs/promises");
     const client = new SpeechClient({
-      credentials: env.gcpServiceAccount as never,
+      ...googleCredentials(),
       projectId: env.gcpProjectId,
     });
 

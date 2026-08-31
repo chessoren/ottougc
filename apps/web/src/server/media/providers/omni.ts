@@ -5,7 +5,7 @@ import path from "node:path";
 import { GoogleAuth } from "google-auth-library";
 import { Storage } from "@google-cloud/storage";
 
-import { env } from "@/lib/env";
+import { env, googleCredentials } from "@/lib/env";
 import { GENERATED_ROOT } from "@/lib/paths";
 
 import { toInlineImage } from "./nano-banana";
@@ -38,7 +38,7 @@ function interactionsUrl(suffix = ""): string {
 
 async function bearer(): Promise<string> {
   const auth = new GoogleAuth({
-    credentials: env.gcpServiceAccount as never,
+    ...googleCredentials(),
     scopes: ["https://www.googleapis.com/auth/cloud-platform"],
   });
   const client = await auth.getClient();
@@ -231,7 +231,7 @@ async function downloadClip(uri: string, promptForHash: string): Promise<string>
     const object = without.slice(slash + 1);
     const storage = new Storage({
       projectId: env.gcpProjectId,
-      credentials: env.gcpServiceAccount as never,
+      ...googleCredentials(),
     });
     await storage.bucket(bucket).file(object).download({ destination: filePath });
   } else {

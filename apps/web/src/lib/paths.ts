@@ -14,7 +14,14 @@ import path from "node:path";
  * The Next app serves the same files through `/generated/[...path]`, so a single
  * path string works in the renderer, in the dashboard and in an upload.
  */
-export const GENERATED_ROOT = path.resolve(process.cwd(), "../video/public/generated");
+/**
+ * On Cloud Run the repository directory is read-only-ish and ephemeral either
+ * way, so generation writes to `/tmp` and finished renders are copied to Cloud
+ * Storage. `GENERATED_DIR` is how the container says so.
+ */
+export const GENERATED_ROOT = process.env.GENERATED_DIR
+  ? path.resolve(process.env.GENERATED_DIR)
+  : path.resolve(process.cwd(), "../video/public/generated");
 
 /** Public URL for a file inside the generated root. */
 export function generatedUrl(...segments: string[]): string {

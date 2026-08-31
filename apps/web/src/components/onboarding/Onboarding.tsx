@@ -181,12 +181,20 @@ export function Onboarding() {
             gap={gaps[gapIndex]!}
             index={gapIndex}
             total={gaps.length}
-            value={answers[gaps[gapIndex]!.id] ?? ""}
+            // The model answered this itself from the site; the founder is
+            // correcting a draft, not filling in a blank.
+            value={answers[gaps[gapIndex]!.id] ?? gaps[gapIndex]!.suggestion ?? ""}
             onAnswer={(v) =>
               setAnswers((prev) => ({ ...prev, [gaps[gapIndex]!.id]: v }))
             }
             onBack={() => (gapIndex === 0 ? setStep("brief") : setGapIndex((i) => i - 1))}
             onNext={() => {
+              // Keep the suggestion if it was left untouched: what is on screen
+              // is what gets saved.
+              const gap = gaps[gapIndex]!;
+              if (answers[gap.id] === undefined && gap.suggestion) {
+                setAnswers((prev) => ({ ...prev, [gap.id]: gap.suggestion! }));
+              }
               if (gapIndex < gaps.length - 1) setGapIndex((i) => i + 1);
               else startTransition(() => void design());
             }}
@@ -444,11 +452,13 @@ function Working({ title, lines, slow }: { title: string; lines: string[]; slow?
 
 /** The fields shown as editable cards, in the order they matter to a script. */
 const BRIEF_CARDS: Array<{ key: keyof CompanyBrief; label: string; hint: string }> = [
+  { key: "headline", label: "Your headline", hint: "The line your site leads with." },
   { key: "whatItDoes", label: "What it does", hint: "One plain sentence." },
   { key: "audience", label: "Who it's for", hint: "A person, not a segment." },
   { key: "chore", label: "The chore it kills", hint: "This is what every video opens on." },
   { key: "oldWay", label: "What they did before", hint: "The villain of half the scripts." },
   { key: "reliefMoment", label: "The moment it clicks", hint: "This is what we film." },
+  { key: "pricing", label: "What it costs", hint: "Quoted from your pricing page — never invented." },
 ];
 
 function BriefStep({
@@ -619,6 +629,14 @@ function QuestionStep({
       </p>
       <h1 className="mt-3 text-4xl md:text-5xl">{gap.question}</h1>
       <p className="mt-4 text-lg leading-relaxed text-ink-muted">{gap.why}</p>
+
+      {gap.suggestion ? (
+        <p className="mt-4 text-base text-ink-subtle">
+          We&rsquo;ve filled in what your site says
+          {gap.suggestionSource ? ` (${gap.suggestionSource})` : ""}. Change it if
+          it&rsquo;s wrong, or keep going.
+        </p>
+      ) : null}
 
       <div className="mt-9">
         {gap.kind === "choice" && gap.choices?.length ? (

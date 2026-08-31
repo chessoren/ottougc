@@ -20,3 +20,6 @@ coverage
 **/.pglite
 # Snapshots of a database that failed to open, kept for recovery, never committed.
 **/.pglite-*
+
+# The Cloud SQL password. Never committed.
+.db-password
