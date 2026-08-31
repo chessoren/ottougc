@@ -57,9 +57,9 @@ gcloud run deploy "${SERVICE}" \
   --memory 4Gi \
   --cpu 2 \
   --timeout 3600 \
-  --concurrency 4 \
-  --min-instances 0 \
-  --max-instances 1 \
+  --concurrency 20 \
+  --min-instances 1 \
+  --max-instances 4 \
   --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT}" \
   --set-env-vars "GOOGLE_CLOUD_GEMINI_LOCATION=global" \
   --set-env-vars "GCS_BUCKET=${BUCKET}" \
@@ -88,9 +88,13 @@ say "Live at ${URL}"
 
 # ── The clock ──────────────────────────────────────────────────────────────
 #
-# One instance, so only one render runs at a time. `--max-instances 1` above and
-# these schedules together are what keep two agents from rendering at once on
-# two vCPUs.
+# Capacity is set above so a render cannot lock out the interface. A render holds
+# its instance for minutes; with one instance and low concurrency every other
+# request is refused, and the dashboard answers "Rate exceeded" while the fleet
+# is working — which is precisely when somebody wants to look at it.
+#
+# One warm instance also spares the first render of the day a 92 MB Chrome
+# download before it can start.
 say "Scheduling the fleet"
 
 schedule() {
