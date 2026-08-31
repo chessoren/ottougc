@@ -110,7 +110,7 @@ let cachedClient: GoogleGenAI | null = null;
 function client(): GoogleGenAI {
   if (cachedClient) return cachedClient;
 
-  if (env.gcpServiceAccount && env.gcpProjectId) {
+  if (env.gcpAuthAvailable && env.gcpProjectId) {
     // Vertex global endpoint: Gemini 3.7 Flash is not served from us-central1.
     cachedClient = new GoogleGenAI({
       vertexai: true,

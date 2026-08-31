@@ -29,7 +29,7 @@ export const OMNI_LIMITS = {
 } as const;
 
 export function omniConfigured(): boolean {
-  return Boolean(!env.forceMockMedia && env.gcpServiceAccount && env.gcpProjectId);
+  return Boolean(!env.forceMockMedia && env.gcpAuthAvailable && env.gcpProjectId);
 }
 
 function interactionsUrl(suffix = ""): string {

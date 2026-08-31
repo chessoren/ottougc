@@ -49,7 +49,7 @@ export const NANO_BANANA_PRICING: Record<string, number> = {
 };
 
 export function nanoBananaConfigured(): boolean {
-  return Boolean(!env.forceMockMedia && env.gcpServiceAccount && env.gcpProjectId);
+  return Boolean(!env.forceMockMedia && env.gcpAuthAvailable && env.gcpProjectId);
 }
 
 let cached: GoogleGenAI | null = null;

@@ -53,7 +53,7 @@ export class OmniMediaProvider implements MediaProvider {
   }
 
   private imageBackend(): MediaProvider {
-    return env.gcpServiceAccount && env.gcpProjectId ? this.vertex : this.fallback;
+    return env.gcpAuthAvailable && env.gcpProjectId ? this.vertex : this.fallback;
   }
 
   generateImages(request: ImageRequest): Promise<MediaAsset[]> {
