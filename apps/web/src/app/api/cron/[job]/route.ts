@@ -10,7 +10,14 @@ import { planFleet } from "@/server/agents/manager";
 import { publishDueposts } from "@/server/publishing/scheduler";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+/**
+ * An hour, matching the Cloud Run request timeout.
+ *
+ * A production run generates several clips at forty seconds each and then
+ * renders, which is minutes of work. Sixty seconds was a Vercel-shaped number
+ * from when this was meant to be deployed there.
+ */
+export const maxDuration = 3600;
 
 /**
  * Scheduled jobs.
@@ -66,10 +73,32 @@ export async function GET(request: Request, { params }: { params: Promise<{ job:
     }
   }
 
+  // Wait for the renders before answering.
+  //
+  // This is not politeness, it is the difference between a video and nothing.
+  // Renders are fire-and-forget from the agent's point of view — right for a
+  // long-lived server, fatal on Cloud Run, where the CPU is taken away the
+  // instant the response is sent. A render started and left running does not
+  // fail; it freezes, at whatever percent it had reached, for ever. Three runs
+  // sat at 0% before the cause was clear.
+  //
+  // The CLI has always awaited this (`agent produce` does), which is exactly why
+  // rendering worked on a laptop and never once worked in the cloud.
+  const renderWait = Date.now();
+  let renderNote: string | undefined;
+  try {
+    const { waitForIdle } = await import("@/server/render/queue");
+    await waitForIdle(45 * 60 * 1000);
+  } catch (error) {
+    renderNote = error instanceof Error ? error.message : String(error);
+  }
+
   return Response.json({
     job,
     brands: activeBrands.length,
     durationMs: Date.now() - started,
+    renderWaitMs: Date.now() - renderWait,
+    ...(renderNote ? { renderNote } : {}),
     results,
   });
 }

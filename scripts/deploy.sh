@@ -63,11 +63,22 @@ gcloud run deploy "${SERVICE}" \
   --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT}" \
   --set-env-vars "GOOGLE_CLOUD_GEMINI_LOCATION=global" \
   --set-env-vars "GCS_BUCKET=${BUCKET}" \
-  --set-env-vars "GENERATED_DIR=/tmp/generated" \
   --set-env-vars "DATABASE_URL=${SOCKET_URL}" \
   --set-env-vars "CRON_SECRET=${CRON_SECRET:?set CRON_SECRET}" \
   --set-env-vars "DAILY_GENERATION_BUDGET_USD=${DAILY_GENERATION_BUDGET_USD:-50}" \
   --set-env-vars "DRY_RUN_PUBLISHING=${DRY_RUN_PUBLISHING:-true}"
+# Note what is deliberately NOT set here: GENERATED_DIR.
+#
+# Pointing the media directory at /tmp looked like the right instinct for a
+# container — and it broke every render. Remotion serves assets to its own
+# browser from the Remotion project's public folder, so media written anywhere
+# else is media the renderer cannot fetch: it sat retrying
+# `127.0.0.1:.../generated/clips/x.mp4` at twenty seconds a go until the request
+# timed out an hour later, having already paid for the footage.
+#
+# The container's filesystem is writable. It is ephemeral, which is what the
+# Cloud Storage copy at the end of each render is for.
+#
 # No service-account key anywhere in that command. The container authenticates
 # as ${RUNTIME_SA:-cursor@...} through the metadata server, so there is no
 # private key in an environment variable, a log line or a revision description.
