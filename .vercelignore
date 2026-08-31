@@ -1,0 +1,11 @@
+.git
+.pglite
+**/.pglite
+apps/web/.env.local
+apps/web/.gcp-service-account.json
+apps/video/public/generated
+**/.next
+**/node_modules
+**/*.tsbuildinfo
+.claude
+docs

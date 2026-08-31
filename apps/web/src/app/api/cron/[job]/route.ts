@@ -10,7 +10,7 @@ import { planFleet } from "@/server/agents/manager";
 import { publishDueposts } from "@/server/publishing/scheduler";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
+export const maxDuration = 60;
 
 /**
  * Scheduled jobs.

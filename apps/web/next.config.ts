@@ -19,6 +19,7 @@ const nextConfig: NextConfig = {
     "@remotion/bundler",
     "@remotion/renderer",
     "@remotion/compositor-darwin-arm64",
+    "@remotion/compositor-linux-x64-gnu",
     "@rspack/core",
     "@rspack/binding",
     "playwright",

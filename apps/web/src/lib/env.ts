@@ -110,7 +110,9 @@ export const env = {
   databaseUrl: str("DATABASE_URL"),
   directUrl: str("DIRECT_URL") ?? str("DATABASE_URL"),
   /** Where PGlite persists when no external Postgres is configured. */
-  pgliteDir: str("PGLITE_DIR") ?? ".pglite",
+  pgliteDir:
+    str("PGLITE_DIR") ??
+    (process.env.VERCEL ? "/tmp/ottougc-pglite" : ".pglite"),
 
   /* -- Google Cloud ------------------------------------------------------ */
   gcpProjectId:
