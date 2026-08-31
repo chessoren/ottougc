@@ -4,6 +4,7 @@ import { loadFont as loadMontserrat } from "@remotion/google-fonts/Montserrat";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
 
 import { AppIcon } from "./components/AppIcon";
+import { ArchitectureDiagram } from "./components/ArchitectureDiagram";
 import { TimelineRenderer } from "./components/TimelineRenderer";
 import { EMPTY_TIMELINE, FPS, HEIGHT, WIDTH, type Timeline } from "./schema";
 import { DEMO_TIMELINE } from "./demo";
@@ -44,6 +45,17 @@ export const RemotionRoot: React.FC = () => {
         width={1024}
         height={1024}
         defaultProps={{ padding: 96 }}
+      />
+
+      {/* The submission's architecture diagram. Drawn in code so it regenerates
+          when the system changes rather than drifting from it. */}
+      <Composition
+        id="ArchitectureDiagram"
+        component={ArchitectureDiagram as never}
+        durationInFrames={1}
+        fps={1}
+        width={2400}
+        height={1600}
       />
     </>
   );
