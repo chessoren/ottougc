@@ -83,14 +83,16 @@ say "Live at ${URL}"
 say "Scheduling the fleet"
 
 schedule() {
-  local name="$1" cron="$2" path="$3" description="$4"
+  local name="$1" cron="$2" path="$3" description="$4" extra="${5:-}"
   local args=(
     --location "${REGION}"
     --schedule "${cron}"
     --time-zone "Europe/Paris"
-    --uri "${URL}/api/cron/${path}"
+    # The secret rides in the query string rather than a header: gcloud's
+    # `--headers` is create-only and errors on update, which silently left the
+    # jobs unauthenticated the first time round. The route accepts either.
+    --uri "${URL}/api/cron/${path}?secret=${CRON_SECRET}${extra}"
     --http-method GET
-    --headers "Authorization=Bearer ${CRON_SECRET}"
     --attempt-deadline 1800s
     --description "${description}"
   )
@@ -106,7 +108,9 @@ schedule() {
 # Creators make the day's video early: it has to be written, generated, checked
 # and rendered well before its publishing slot. A render that fails at 18:25 for
 # an 18:30 slot is a day lost.
-schedule ottougc-produce "0 7 * * *"    produce "Each creator makes today's video"
+# Capped while the generation budget is being watched: a video costs about three
+# dollars, and ten channels a day is thirty.
+schedule ottougc-produce "0 7 * * *"    produce "Each creator makes today's video" "&limit=3"
 schedule ottougc-publish "*/30 * * * *" publish "Post anything whose slot has come"
 schedule ottougc-ingest  "0 * * * *"    ingest  "Pull metrics, apply the decision grid"
 schedule ottougc-analyse "30 23 * * *"  analyse "Interpret the day, write lessons to memory"
