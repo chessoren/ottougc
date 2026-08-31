@@ -1,0 +1,20 @@
+{
+  "name": "ottougc",
+  "private": true,
+  "version": "0.1.0",
+  "description": "OttoUGC — autonomous UGC agent fleet that grows apps on short-form video",
+  "packageManager": "pnpm@10.33.0",
+  "engines": { "node": ">=20.9.0" },
+  "scripts": {
+    "dev": "pnpm --filter @ottougc/web dev",
+    "build": "pnpm --filter @ottougc/web build",
+    "start": "pnpm --filter @ottougc/web start",
+    "lint": "pnpm --filter @ottougc/web lint",
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "db:generate": "pnpm --filter @ottougc/web db:generate",
+    "db:push": "pnpm --filter @ottougc/web db:push",
+    "db:studio": "pnpm --filter @ottougc/web db:studio",
+    "db:seed": "pnpm --filter @ottougc/web db:seed",
+    "video:studio": "pnpm --filter @ottougc/video studio"
+  }
+}
