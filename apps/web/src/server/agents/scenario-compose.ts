@@ -70,13 +70,16 @@ export function composeFromScenario(input: ComposeInput): Timeline {
     if (!clip) continue;
 
     const w = written.beats[i];
-    // The clip's real length, not the beat's nominal one.
+    // The clip's real length, minus the last frame.
     //
-    // Clamping to the scenario's declared duration truncated the footage: Omni
-    // returns whole seconds and the beat asked for five, so an eight second take
-    // was cut at five — mid-sentence, mid-word, with the captions still running.
-    // Whatever was generated is what gets cut.
-    const durationMs = clip.durationMs;
+    // Two lessons, both learned the hard way. Clamping to the scenario's
+    // declared duration truncated the footage — an eight second take cut at
+    // five, mid-word, with the captions still running. And landing exactly on
+    // the final frame asks the renderer for a frame that may not be there, and
+    // it answers by holding the previous one: a visible stall at every cut.
+    //
+    // So: whatever was generated is what gets cut, less one frame of margin.
+    const durationMs = Math.max(500, clip.durationMs - Math.round(1000 / FPS));
 
     video.push({
       id: `v${i}`,

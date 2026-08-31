@@ -142,15 +142,26 @@ export async function generateOmniClip(request: VideoClipRequest): Promise<Media
 
   const localUrl = await downloadClip(video, prompt);
 
+  // Measure the file rather than trusting the request.
+  //
+  // Omni is asked for eight seconds and returns, say, 7.94 — close enough for
+  // billing and fatally wrong for a timeline. Every downstream layer sized the
+  // shot from the number we asked for, so the last frames of each clip had no
+  // source frames behind them and the renderer did the only thing it can: held
+  // the last one. A held frame at every cut is what a viewer calls a freeze.
+  const measuredMs = await measureDuration(localUrl);
+
   return {
     url: localUrl,
     mimeType: "video/mp4",
     provider: "gemini-omni",
     model,
     costUsd: seconds * COST_PER_SECOND_USD,
-    durationMs: seconds * 1000,
+    durationMs: measuredMs ?? seconds * 1000,
     meta: {
       referenceCount: refIndex,
+      requestedSeconds: seconds,
+      measuredMs,
       generatedAudio: request.generateAudio !== false,
       latencyMs: Date.now() - started,
       interactionId: interaction.id,
@@ -250,6 +261,24 @@ function mimeOf(filePath: string): string {
   if (ext === ".webp") return "image/webp";
   if (ext === ".svg") return "image/svg+xml";
   return "image/png";
+}
+
+/**
+ * The clip's real length, in milliseconds.
+ *
+ * Returns null rather than throwing: a clip whose duration cannot be read is
+ * still a usable clip, and the requested duration is a reasonable fallback.
+ */
+async function measureDuration(generatedUrl: string): Promise<number | null> {
+  try {
+    const { getVideoMetadata } = await import("@remotion/renderer");
+    const file = path.join(GENERATED_ROOT, generatedUrl.replace(/^\/generated\//, ""));
+    const { durationInSeconds } = await getVideoMetadata(file);
+    if (!durationInSeconds || durationInSeconds <= 0) return null;
+    return Math.round(durationInSeconds * 1000);
+  } catch {
+    return null;
+  }
 }
 
 function vertexOmniModel(_requested: string): string {
