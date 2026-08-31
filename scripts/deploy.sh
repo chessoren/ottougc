@@ -30,7 +30,7 @@ gcloud config set run/region "${REGION}" >/dev/null
 say "Enabling the services this needs"
 gcloud services enable \
   sqladmin.googleapis.com run.googleapis.com cloudscheduler.googleapis.com \
-  cloudbuild.googleapis.com artifactregistry.googleapis.com \
+  cloudbuild.googleapis.com artifactregistry.googleapis.com sql-component.googleapis.com \
   aiplatform.googleapis.com storage.googleapis.com \
   texttospeech.googleapis.com speech.googleapis.com >/dev/null
 
@@ -42,7 +42,8 @@ say "Cloud SQL: ${CONNECTION_NAME}"
 # There is no network path to open and no IP to allowlist, which is why the
 # instance can stay closed to the internet.
 DB_PASSWORD="${OTTOUGC_DB_PASSWORD:?set OTTOUGC_DB_PASSWORD to the database password}"
-SOCKET_URL="postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}?host=/cloudsql/${CONNECTION_NAME}"
+# No host between the "@" and the "/": this is a socket, not a server.
+SOCKET_URL="postgresql://${DB_USER}:${DB_PASSWORD}@/${DB_NAME}?host=/cloudsql/${CONNECTION_NAME}"
 
 # ── The worker ─────────────────────────────────────────────────────────────
 say "Building and deploying the worker"

@@ -24,7 +24,7 @@ import {
   type FleetResult,
   type FirstVideoResult,
 } from "@/server/onboarding/actions";
-import type { CompanyBrief } from "@/server/onboarding/brief";
+import type { BriefGap, CompanyBrief } from "@/server/onboarding/brief";
 
 /**
  * Onboarding.
@@ -609,7 +609,9 @@ function QuestionStep({
   pending,
   error,
 }: {
-  gap: { id: string; question: string; why: string; kind: string; choices?: string[]; required: boolean };
+  // The server's own type, so a field added to the brief cannot silently fail to
+  // reach the screen — which is exactly how the pre-filled answers went missing.
+  gap: BriefGap;
   index: number;
   total: number;
   value: string;
