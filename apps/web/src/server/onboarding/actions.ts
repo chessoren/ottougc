@@ -269,6 +269,23 @@ export async function makeFirstVideoAction(brandId: string): Promise<FirstVideoR
 
     if (!output?.postId) return { ok: false, error: run.summary };
 
+    // Wait for the render before answering.
+    //
+    // The agent hands the render to a queue and returns — right for a server,
+    // wrong here twice over. The onboarding is *showing somebody their first
+    // video*, so returning before one exists shows them nothing. And on Cloud
+    // Run the CPU is withdrawn the moment this action returns, so the render it
+    // just started does not finish slowly: it freezes where it stands. A run at
+    // 22:47 generated every clip, began rendering at 22:52, and produced
+    // nothing at all.
+    try {
+      const { waitForIdle } = await import("@/server/render/queue");
+      await waitForIdle(20 * 60 * 1000);
+    } catch {
+      // A render that overruns still leaves a post behind; the dashboard will
+      // show its state. Better a slow answer than a wrong one.
+    }
+
     const { posts } = await import("@/server/db/schema");
     const [post] = await db
       .select({ url: posts.renderedVideoUrl })
