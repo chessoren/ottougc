@@ -237,12 +237,8 @@ export function Onboarding() {
           />
         ) : null}
 
-        {/* The video is the last thing the onboarding proves. After it, the
-            dashboard — where the fleet, the run traces and the decisions live.
-            Connecting a channel moves there too: it is an account action, not a
-            condition of seeing that the thing works. */}
         {step === "video" && video ? (
-          <VideoStep video={video} onNext={() => router.push("/dashboard")} />
+          <VideoStep video={video} onNext={() => setStep("connect")} />
         ) : null}
 
         {step === "connect" && brandId ? (
@@ -266,16 +262,6 @@ const STEP_LABELS: Partial<Record<Step, string>> = {
   video: "Your first video",
   connect: "Go live",
 };
-
-/**
- * The onboarding ends on the video and hands over to the dashboard.
- *
- * Connecting a YouTube channel used to sit between the two. It is an account
- * action — an OAuth consent screen — and putting it directly after the proof
- * asked somebody to grant access to their channels one second after seeing the
- * product work for the first time. It lives in the dashboard now, where it is
- * reachable but not a toll gate.
- */
 
 function Progress({ value, step }: { value: number; step: Step }) {
   return (
@@ -863,12 +849,9 @@ function VideoStep({ video, onNext }: { video: FirstVideoResult; onNext: () => v
 
           <div className="mt-6">
             <Button size="lg" onClick={onNext} className="w-full sm:w-auto">
-              See the whole fleet
+              Now let&rsquo;s get it posting
               <ArrowRight size={17} strokeWidth={2.4} />
             </Button>
-            <p className="mt-3 text-base text-ink-subtle">
-              Connect your channels from the dashboard whenever you&rsquo;re ready.
-            </p>
           </div>
         </div>
       </div>
