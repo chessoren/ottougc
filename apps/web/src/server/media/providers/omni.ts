@@ -8,6 +8,7 @@ import { Storage } from "@google-cloud/storage";
 import { env } from "@/lib/env";
 import { GENERATED_ROOT } from "@/lib/paths";
 
+import { toInlineImage } from "./nano-banana";
 import type { MediaAsset, VideoClipRequest } from "../types";
 
 /**
@@ -54,8 +55,20 @@ export async function generateOmniClip(request: VideoClipRequest): Promise<Media
   const seconds = clampDuration(request.durationSeconds);
   const references = (request.referenceImageUrls ?? []).slice(0, OMNI_LIMITS.maxReferenceImages);
 
+  // The storyboard panel, when there is one, is the first image in the list and
+  // is described as the opening frame rather than as one more reference. That
+  // distinction matters: a panel treated as inspiration gets reinterpreted, and
+  // the composition the image model got right is thrown away.
+  const panelUrl = request.referenceImageUrl;
+  const orderedRefs = panelUrl
+    ? [panelUrl, ...references.filter((r) => r !== panelUrl)].slice(0, OMNI_LIMITS.maxReferenceImages)
+    : references;
+
   const prompt = [
     `${seconds} second, ${request.aspectRatio} video.`,
+    panelUrl
+      ? "The FIRST attached image is the opening frame of this clip. Start from it exactly — same person, same framing, same room, same light — and animate forward from there. The images after it are the same person photographed on other days."
+      : "",
     request.appearanceSeed ? `SUBJECT (must match the reference images): ${request.appearanceSeed}` : "",
     request.prompt,
     request.speech
@@ -70,10 +83,10 @@ export async function generateOmniClip(request: VideoClipRequest): Promise<Media
 
   const input: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
   let refIndex = 0;
-  for (const url of references) {
-    const inline = await toInlineData(url);
+  for (const url of orderedRefs) {
+    const inline = await toInlineImage(url);
     if (!inline) continue;
-    input.push({ type: "image", mime_type: inline.mime_type, data: inline.data });
+    input.push({ type: "image", mime_type: inline.mimeType, data: inline.data });
     refIndex += 1;
   }
 
@@ -229,30 +242,6 @@ async function downloadClip(uri: string, promptForHash: string): Promise<string>
   }
 
   return `/generated/clips/${name}`;
-}
-
-async function toInlineData(
-  url: string,
-): Promise<{ mime_type: string; data: string } | null> {
-  try {
-    if (url.startsWith("data:")) {
-      const [header, data] = url.split(",");
-      return { mime_type: header?.slice(5, header.indexOf(";")) ?? "image/png", data: data ?? "" };
-    }
-    if (/^https?:/.test(url)) {
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const buffer = Buffer.from(await res.arrayBuffer());
-      return { mime_type: res.headers.get("content-type") ?? "image/png", data: buffer.toString("base64") };
-    }
-    const filePath = path.join(GENERATED_ROOT, url.replace(/^\/generated\//, ""));
-    const buffer = await readFile(filePath);
-    const mime = mimeOf(filePath);
-    if (mime === "image/svg+xml") return null;
-    return { mime_type: mime, data: buffer.toString("base64") };
-  } catch {
-    return null;
-  }
 }
 
 function mimeOf(filePath: string): string {

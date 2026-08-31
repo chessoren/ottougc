@@ -37,9 +37,30 @@ export interface ImageRequest {
   /** Reuse across a set so a photo series looks shot on one device, one day. */
   seed?: number;
   count?: number;
-  /** High-fidelity tier (Imagen 4) vs fast tier (Gemini Flash Image). */
+  /** Nano Banana 2 (`gemini-3-pro-image`) vs the faster Flash Image tier. */
   hiFi?: boolean;
+  /**
+   * Photographs to condition on.
+   *
+   * This is what makes a character sheet a sheet rather than seven strangers,
+   * and what lets storyboard panel N inherit the room from panel N-1.
+   */
   referenceImageUrls?: string[];
+  /**
+   * What the reference photographs are evidence *of*.
+   *
+   * The distinction is load-bearing. A character sheet needs seven pictures of
+   * one person in different clothes, rooms and moods, so only the identity may
+   * be copied. A storyboard needs consecutive frames of one continuous moment,
+   * so the room, the wardrobe and the light must be copied too. Telling the
+   * model to preserve everything in the first case produces seven copies of the
+   * same photograph, which is a sheet that teaches the video model nothing.
+   */
+  preserve?: "IDENTITY" | "SCENE";
+  /** Excluded explicitly rather than hoped away. */
+  negativePrompt?: string;
+  /** 2K when the image will be fed to the video model, which resamples it. */
+  size?: "1K" | "2K";
 }
 
 export interface MusicRequest {

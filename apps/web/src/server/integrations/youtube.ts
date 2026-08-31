@@ -12,14 +12,20 @@ import { apiProjects, channels, quotaLedger } from "@/server/db/schema";
 /**
  * YouTube integration.
  *
- * The hard part of this file is not the API, it is the quota. A Google Cloud
- * project gets 10 000 quota units per day and `videos.insert` costs 1 600, so a
- * single project can publish six videos a day — against a product that targets
- * fifteen. Three things follow, and all three are implemented here:
+ * The hard part of this file is not the API, it is the quota — though it is much
+ * less hard than it used to be. Uploads used to cost 1 600 units out of a 10 000
+ * unit daily pool, which capped a project at six videos a day. Since 1 June 2026
+ * `videos.insert` has its **own bucket**: 1 unit per call, 100 calls a day, not
+ * drawn from the 10 000 units everything else shares. `search.list` is metered
+ * the same way.
  *
- *   1. **Project sharding.** Uploads are routed to the pooled project with the
- *      most remaining quota, and every call is written to a ledger so the
- *      remaining budget is a fact rather than an estimate.
+ * Three things follow, and all three are implemented here:
+ *
+ *   1. **Two budgets, tracked separately.** Uploads are counted as calls against
+ *      the 100/day bucket; everything else draws on the unit pool. Conflating
+ *      them is what produced the old six-a-day ceiling. Sharding across projects
+ *      still works and is still used, but it is now an optimisation rather than
+ *      the only way to reach a normal posting cadence.
  *   2. **No `search.list`, ever, on channels we own.** Search costs 100 units;
  *      reading the uploads playlist costs 1. Same data, hundredth of the price.
  *   3. **Analytics comes from the Analytics API, not the Data API.** Retention
@@ -37,9 +43,14 @@ export const YOUTUBE_SCOPES = [
   "openid",
 ];
 
-/** Published quota costs, in units. */
+/**
+ * Published quota costs, in units.
+ *
+ * `videosInsert` and `searchList` are billed against their own daily buckets
+ * (see `UPLOAD_CALLS_PER_DAY`), not against the 10 000-unit pool.
+ */
 export const QUOTA_COST = {
-  videosInsert: 1600,
+  videosInsert: 1,
   videosUpdate: 50,
   videosList: 1,
   playlistItemsList: 1,
@@ -47,8 +58,17 @@ export const QUOTA_COST = {
   commentThreadsInsert: 50,
   commentThreadsList: 1,
   commentsSetModerationStatus: 50,
-  searchList: 100,
+  searchList: 1,
 } as const;
+
+/**
+ * Daily `videos.insert` calls per Google Cloud project.
+ *
+ * Its own bucket since 1 June 2026 — independent of the 10 000-unit pool. The
+ * previous model (1 600 units out of 10 000) capped a project at six uploads a
+ * day and is what the fleet's cadence used to be designed around.
+ */
+export const UPLOAD_CALLS_PER_DAY = 100;
 
 export function redirectUri(): string {
   return `${env.appUrl}${env.youtube.redirectPath}`;
@@ -244,7 +264,7 @@ export async function pickApiProject(unitsNeeded: number): Promise<QuotaStatus> 
       dailyQuotaUnits: 10000,
       usedToday: used,
       remaining: 10000 - used,
-      uploadsRemaining: Math.floor((10000 - used) / QUOTA_COST.videosInsert),
+      uploadsRemaining: UPLOAD_CALLS_PER_DAY - (await uploadCallsToday(null)),
     };
   }
 
@@ -267,7 +287,7 @@ export async function pickApiProject(unitsNeeded: number): Promise<QuotaStatus> 
         dailyQuotaUnits: p.dailyQuotaUnits,
         usedToday: used,
         remaining,
-        uploadsRemaining: Math.floor(remaining / QUOTA_COST.videosInsert),
+        uploadsRemaining: UPLOAD_CALLS_PER_DAY - (await uploadCallsToday(p.id)),
       };
     }
   }
@@ -279,8 +299,29 @@ export async function pickApiProject(unitsNeeded: number): Promise<QuotaStatus> 
     dailyQuotaUnits: best.dailyQuotaUnits,
     usedToday: best.unitsUsedToday,
     remaining: best.dailyQuotaUnits - best.unitsUsedToday,
-    uploadsRemaining: 0,
+    uploadsRemaining: UPLOAD_CALLS_PER_DAY - (await uploadCallsToday(best.id)),
   };
+}
+
+/**
+ * Uploads used today, as a count of calls.
+ *
+ * `videos.insert` is billed against a bucket of 100 calls a day that is separate
+ * from the 10 000-unit pool, so this counts rows rather than summing units.
+ */
+async function uploadCallsToday(apiProjectId: string | null): Promise<number> {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const conditions = [
+    gte(quotaLedger.createdAt, start),
+    sql`${quotaLedger.operation} like 'videos.insert%'`,
+  ];
+  if (apiProjectId) conditions.push(eq(quotaLedger.apiProjectId, apiProjectId));
+  const rows = await db
+    .select({ n: sql<string>`count(*)` })
+    .from(quotaLedger)
+    .where(and(...conditions));
+  return Number(rows[0]?.n ?? 0);
 }
 
 async function unitsUsedToday(apiProjectId: string | null): Promise<number> {
@@ -359,8 +400,8 @@ export async function uploadVideo(req: UploadRequest): Promise<UploadResult> {
 
   if (quota.uploadsRemaining <= 0 && !env.dryRunPublishing) {
     throw new Error(
-      `YouTube upload quota is used up for today (${quota.usedToday}/${quota.dailyQuotaUnits} units, ` +
-        `an upload costs ${QUOTA_COST.videosInsert}). Add another Google Cloud project to the pool, or wait for the reset at midnight Pacific.`,
+      `All ${UPLOAD_CALLS_PER_DAY} of today's uploads are used up on this project. ` +
+        `Add another Google Cloud project to the pool, or wait for the reset at midnight Pacific.`,
     );
   }
 

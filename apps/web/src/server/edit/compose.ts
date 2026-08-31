@@ -138,6 +138,8 @@ export function composeTimeline(input: ComposeInput): Timeline {
       layer: 0,
       layout: { mode: "full" },
       fit: "cover",
+      // This composer lays its own narration track, so the clips stay silent.
+      audioGain: 0,
       opacity: 1,
       effects: baseEffects(i, clipDuration, kind, asset?.animateAsClip),
       transitionIn: transitionFor(i, format, beat),

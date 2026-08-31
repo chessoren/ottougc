@@ -128,7 +128,16 @@ export async function buildCharacter(channelId: string): Promise<BuiltCharacter>
         prompt,
         aspectRatio: "9:16",
         count: 1,
-        hiFi: plan.required,
+        negativePrompt,
+        // Only the identity carries across a character sheet. The plan asks for
+        // a different outfit, a different expression, a different room — so
+        // copying the whole previous photograph would defeat it.
+        preserve: "IDENTITY",
+        // Every reference is hi-fi. The sheet is generated once per channel and
+        // then conditions every panel and every clip that channel ever makes —
+        // saving nine cents here degrades a hundred videos.
+        hiFi: true,
+        size: "2K",
         // A stable seed per channel keeps the whole set looking like one shoot
         // on one device rather than seven unrelated photographs.
         seed: seedOf(channelId + plan.purpose),
@@ -155,7 +164,6 @@ export async function buildCharacter(channelId: string): Promise<BuiltCharacter>
       failed++;
       if (plan.required) degraded = true;
     }
-    void negativePrompt;
   }
 
   sheet.referenceImages = references;

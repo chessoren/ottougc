@@ -156,6 +156,24 @@ export const videoClipSchema = z.object({
     })
     .default({ type: "cut", durationMs: 0, direction: "left" }),
   opacity: z.number().min(0).max(1).default(1),
+  /**
+   * How loud this clip's own audio plays.
+   *
+   * It defaults to silent because that was true for years: the video model made
+   * pictures, a separate voice track carried the words, and letting a clip's
+   * audio through only added noise to the mix.
+   *
+   * Omni changed that. It renders the dialogue *inside* the clip, in sync with
+   * the mouth, and that performance is the entire soundtrack of a talking-head
+   * video. The renderer muted it unconditionally, which is why the first
+   * finished videos played silent under a music bed — the woman was speaking
+   * and nobody could hear her.
+   *
+   * Still explicit rather than always-on: a narrated scenario wants the clip
+   * held right down under the voice-over, and a silent-reaction scenario wants
+   * it off entirely.
+   */
+  audioGain: z.number().min(0).max(2).default(0),
   /** Free-text note from the editor agent, surfaced in the storyboard UI. */
   note: z.string().optional(),
 });

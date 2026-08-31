@@ -135,18 +135,33 @@ export const env = {
   models: {
     /** The agent brain. Gemini 3.7 Flash went GA 2026-08-13. */
     brain: str("MODEL_BRAIN") ?? "gemini-3.7-flash",
-    /** Heavier reasoning for strategy synthesis and darwinian analysis. */
-    strategist: str("MODEL_STRATEGIST") ?? "gemini-3.1-pro",
+    /**
+     * Heavier reasoning for strategy synthesis and darwinian analysis.
+     *
+     * Not a Pro model: `gemini-3.1-pro` returns 404 on this account, and a
+     * strategist that 404s is worse than a flash model that answers. Depth comes
+     * from `models.thinking` instead.
+     */
+    strategist: str("MODEL_STRATEGIST") ?? "gemini-3.7-flash",
     /** Cheap classifier for comment triage. */
-    fast: str("MODEL_FAST") ?? "gemini-3.1-flash-lite",
+    fast: str("MODEL_FAST") ?? "gemini-2.5-flash-lite",
+    /**
+     * How hard the brain thinks before answering.
+     *
+     * Gemini 3.x spends output budget on reasoning before it writes, and the
+     * level is worth setting explicitly: LOW measurably shortens the chain, HIGH
+     * lengthens it. Scene writing and strategy are judgement calls, so they run
+     * HIGH; the cheap classifier overrides to LOW at its call site.
+     */
+    thinking: (str("MODEL_THINKING") ?? "HIGH").toUpperCase(),
     // Gemini Omni Flash: 3-10 s clips, 9:16, up to seven reference images and
     // synchronised native audio. The reference-image input is what makes one
     // recognisable persona possible across a hundred clips.
     video: str("MODEL_VIDEO") ?? "gemini-omni-flash-preview",
     videoFast: str("MODEL_VIDEO_FAST") ?? "gemini-omni-flash-preview",
-    /** "Nano Banana" is Gemini's image model line. */
-    image: str("MODEL_IMAGE") ?? "gemini-2.5-flash-image",
-    imageHiFi: str("MODEL_IMAGE_HIFI") ?? "imagen-4.0-generate-001",
+    /** Nano Banana 2. Reached through `generateContent`, never through Imagen. */
+    image: str("MODEL_IMAGE") ?? "gemini-3-pro-image",
+    imageHiFi: str("MODEL_IMAGE_HIFI") ?? "gemini-3-pro-image",
     music: str("MODEL_MUSIC") ?? "lyria-002",
     ttsVoice: str("MODEL_TTS_VOICE") ?? "en-US-Chirp3-HD-Aoede",
   },

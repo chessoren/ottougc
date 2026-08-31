@@ -19,8 +19,10 @@ import { compileShot, critiqueShot, type ShotSpec } from "@/server/knowledge/pro
 import { ALL_SCENARIOS, defaultMixFor, getScenario, shapeSignature } from "@/server/knowledge/scenarios";
 import type { Scenario } from "@/server/knowledge/scenarios";
 import { getMediaProvider } from "@/server/media";
+import { transcribeClip, type ClipTranscript } from "@/server/media/captions";
 import { buildCharacter, getCharacter, hasCharacter } from "@/server/persona/build";
 
+import { buildStoryboard } from "./storyboard";
 import { writeScenario } from "./scenario-writer";
 import { composeFromScenario } from "./scenario-compose";
 import { getWorkspace } from "./workspace";
@@ -35,12 +37,16 @@ import type { ToolContext } from "./types";
  *   2. a scenario is chosen for its *shape*, not its subject,
  *   3. the writer fills the beats with real brand material,
  *   4. each beat is compiled into a shot specification and critiqued,
- *   5. clips are generated with the character's reference images attached,
- *   6. the timeline is assembled from the scenario's declared shape.
+ *   5. the whole sequence is drawn as storyboard panels, each conditioned on the
+ *      character's photographs and on the panel before it, and each inspected,
+ *   6. the video model animates an approved panel rather than imagining a frame,
+ *   7. the timeline is assembled from the scenario's declared shape.
  *
  * Steps one and five are what make a fleet of personas possible. Step two is
  * what stops ten channels producing the same video. Step four is what stops the
- * prompts being vague.
+ * prompts being vague, and step five is what stops the frame being wrong: the
+ * image model composes far better than the video model, so the frame is decided
+ * in stills, cheaply, before anything expensive is generated.
  */
 
 export interface ProductionResult {
@@ -146,6 +152,10 @@ export async function produceScenario(
     targetUrl: row.brand.targetUrl,
   });
   degraded ||= written.degraded;
+  if (written.writerFailure) {
+    notes.push(`The writer fell back to templates — ${written.writerFailure}.`);
+    await ctx.note(`Scene writing failed: ${written.writerFailure}`);
+  }
 
   /* 4. Persist the post before spending on generation ---------------------- */
   const [post] = await db
@@ -171,9 +181,12 @@ export async function produceScenario(
   const utmContent = `${row.channel.handle ?? "channel"}_${postId.slice(0, 8)}_${scenario.id}`;
   await db.update(posts).set({ utmContent }).where(eq(posts.id, postId));
 
-  /* 5. Shots -------------------------------------------------------------- */
-  const media = getMediaProvider();
-  const clips: Array<{ url: string; durationMs: number; beatIndex: number }> = [];
+  /* 5. Shot specifications ------------------------------------------------ */
+  //
+  // Every shot is specified before anything is generated, because the storyboard
+  // needs the whole sequence: panel two is drawn from panel one, so they cannot
+  // be built one at a time as the clips are made.
+  const planned: Array<{ beatIndex: number; spec: ShotSpec; line?: string }> = [];
 
   for (const [i, beat] of scenario.beats.entries()) {
     const w = written.beats[i];
@@ -189,9 +202,33 @@ export async function produceScenario(
       angle: beat.angleOverride,
       lighting: beat.lighting,
       ambience: beat.ambience,
-      durationSeconds: beat.durationSeconds,
+      durationSeconds: shotSeconds(beat.durationSeconds, w.line),
       avoid: scenario.forbidden.filter((f) => f.length < 60),
     };
+
+    // A screen the shot cannot honestly show.
+    //
+    // Several scenarios direct an insert "on the screen", and the video model
+    // obliges by inventing one: a run came back with a fabricated Shopify
+    // dashboard, another with a fake Instagram analytics grid. Both are
+    // interfaces that do not exist, presented as evidence, in a product whose
+    // whole claims policy exists to stop exactly that.
+    //
+    // So the screen is removed from the direction and the shot becomes what it
+    // should have been — the hands, and the face reacting to what is on it.
+    // When the brand's own screenshots have been collected, they go here
+    // instead; until then, showing nothing beats showing a forgery.
+    if (
+      spec.archetype !== "MIRROR" &&
+      spec.archetype !== "FOUND_FOOTAGE" &&
+      /\b(screen|phone|laptop|tablet|monitor|display|dashboard)\b/i.test(spec.action)
+    ) {
+      spec.action = `${spec.action.replace(
+        /\b(the |a |their )?(screen|phone|laptop|tablet|monitor|display|dashboard)\b/gi,
+        "it",
+      )} The device itself is out of frame or face down — we see only their hands and their reaction to it.`;
+      notes.push(`Shot ${i + 1}: the scripted screen was removed — no real capture to show.`);
+    }
 
     const problems = critiqueShot(spec);
     if (problems.length > 0) {
@@ -199,20 +236,83 @@ export async function produceScenario(
       await ctx.note(`Shot ${i + 1} flagged — ${problems[0]}`);
     }
 
+    planned.push({ beatIndex: i, spec, line: w.line });
+  }
+
+  const sheetRefs = sheet.referenceImages.map((r) => r.url).filter(Boolean) as string[];
+
+  /* 6. Storyboard ---------------------------------------------------------- */
+  //
+  // The frame is decided in images before it is decided in video. Each panel is
+  // conditioned on the character's photographs and on the previous panel, then
+  // inspected by a vision model. A rejected panel costs about thirteen cents; a
+  // rejected clip costs sixty and forty seconds, so this is where the failure
+  // rate is meant to live.
+  await ctx.note(`Drawing the storyboard — ${planned.length} panels.`);
+  const board = await buildStoryboard({
+    shots: planned.map((p) => p.spec),
+    characterRefs: sheetRefs,
+    seed: seedOf(postId),
+    onNote: (message) => ctx.note(message),
+  });
+  costUsd += board.costUsd;
+  degraded ||= board.degraded;
+  notes.push(...board.notes);
+
+  for (const panel of board.panels) {
+    await db.insert(postAssets).values({
+      postId,
+      kind: "STILL",
+      sequence: panel.beatIndex,
+      url: panel.url,
+      prompt: panel.prompt,
+      provider: "nano-banana",
+      model: panel.model,
+      costUsd: String(panel.costUsd),
+      status: "READY",
+      meta: {
+        role: "STORYBOARD_PANEL",
+        beatIndex: panel.beatIndex,
+        attempts: panel.attempts,
+        problems: panel.problems,
+        verdict: panel.verdict,
+        negativePrompt: panel.negativePrompt,
+      } as never,
+    });
+  }
+
+  /* 7. Shots --------------------------------------------------------------- */
+  const media = getMediaProvider();
+  const clips: Array<{
+    url: string;
+    durationMs: number;
+    beatIndex: number;
+    transcript?: ClipTranscript;
+  }> = [];
+
+  for (const [order, entry] of planned.entries()) {
+    const { beatIndex: i, spec, line } = entry;
     const compiled = compileShot(spec);
+    const panel = board.panels.find((p) => p.beatIndex === order);
+
+    // The panel leads the reference list: it is the frame this clip has to
+    // start from. The character photographs follow, so the face stays locked
+    // even where the animation drifts away from the panel's composition.
+    const referenceImageUrls = [...(panel ? [panel.url] : []), ...sheetRefs].slice(0, 7);
 
     try {
       const asset = await media.generateVideoClip({
         prompt: compiled.prompt,
         negativePrompt: compiled.negativePrompt,
         appearanceSeed: sheet.anchor,
-        referenceImageUrls: sheet.referenceImages.map((r) => r.url).filter(Boolean) as string[],
+        referenceImageUrls,
+        referenceImageUrl: panel?.url,
         durationSeconds: compiled.durationSeconds,
         aspectRatio: "9:16",
         // Omni's native audio carries the dialogue when the scenario has speech;
         // narrated and silent scenarios get their audio from the timeline.
-        generateAudio: Boolean(w.line),
-        speech: w.line,
+        generateAudio: Boolean(line),
+        speech: line,
         fast: scenario.family === "MICRO",
       });
 
@@ -221,7 +321,23 @@ export async function produceScenario(
       if (meta.isPlaceholder) degraded = true;
       if (meta.omniError) notes.push(`Omni shot ${i + 1}: ${meta.omniError}`);
 
-      clips.push({ url: asset.url, durationMs: asset.durationMs ?? beat.durationSeconds * 1000, beatIndex: i });
+      const clipDurationMs = asset.durationMs ?? spec.durationSeconds * 1000;
+
+      // Read the words back off the clip Omni just made.
+      //
+      // Not off the line we asked for: Omni paraphrases, pauses and swallows
+      // words, and captions timed from the script drift out of sync inside two
+      // seconds. Measuring what was actually said is the difference between
+      // captions that look edited and captions that look automated.
+      let transcript: ClipTranscript | undefined;
+      if (line) {
+        transcript = await transcribeClip(asset.url, line, clipDurationMs);
+        if (transcript.estimated) {
+          notes.push(`Shot ${i + 1}: caption timings estimated, not measured.`);
+        }
+      }
+
+      clips.push({ url: asset.url, durationMs: clipDurationMs, beatIndex: i, transcript });
 
       await db.insert(postAssets).values({
         postId,
@@ -235,9 +351,9 @@ export async function produceScenario(
         durationMs: asset.durationMs,
         status: "READY",
         meta: {
-          shotArchetype: beat.archetype,
+          shotArchetype: spec.archetype,
           negativePrompt: compiled.negativePrompt,
-          critique: problems,
+          panelUrl: panel?.url ?? null,
           ...(asset.meta ?? {}),
         } as never,
       });
@@ -249,15 +365,7 @@ export async function produceScenario(
     }
   }
 
-  if (clips.length === 0) {
-    await db
-      .update(posts)
-      .set({ status: "FAILED", failureReason: "No shot could be generated.", updatedAt: new Date() })
-      .where(eq(posts.id, postId));
-    throw new Error("No shot could be generated.");
-  }
-
-  /* 6. Music -------------------------------------------------------------- */
+  /* 8. Music -------------------------------------------------------------- */
   let musicUrl: string | undefined;
   let beatGridMs: number[] = [];
   if (scenario.shape.music !== "NONE") {
@@ -288,7 +396,7 @@ export async function produceScenario(
     }
   }
 
-  /* 7. Timeline ----------------------------------------------------------- */
+  /* 9. Timeline ----------------------------------------------------------- */
   const timeline = composeFromScenario({
     timelineId: `tl_${postId.slice(0, 8)}`,
     scenario,
@@ -296,6 +404,7 @@ export async function produceScenario(
     clips,
     musicUrl,
     beatGridMs,
+    hookText: written.hook,
   });
 
   // The render tool reads the timeline from the run workspace, so the editing
@@ -402,6 +511,35 @@ async function chooseScenario(
     });
 
   return chosen;
+}
+
+/**
+ * How long a shot should actually be.
+ *
+ * The scenarios were written with four and five second beats, which came from a
+ * time when a clip was a b-roll fragment under a voice-over. A beat that carries
+ * a spoken line needs room to breathe: at three words a second, five seconds is
+ * fifteen words, and the delivery comes out rushed because there is nowhere for
+ * a pause to go.
+ *
+ * Eight seconds is the working length — close to Omni's ten second ceiling, and
+ * it puts a three-shot scenario at around twenty-two seconds, which is where
+ * short-form retention data says these videos should sit. Silent inserts stay
+ * short: a held shot of nothing is where people leave.
+ */
+function shotSeconds(declared: number, line: string | undefined): number {
+  if (!line?.trim()) return Math.min(10, Math.max(3, Math.round(Math.max(declared, 5))));
+
+  // Length the line, then add air.
+  //
+  // A flat eight-second minimum was the first attempt and it padded: a
+  // four-word line in an eight-second shot left four seconds of a person
+  // sitting still, which measured as room tone and read as a stall. Two and a
+  // half words a second is unhurried conversational delivery; a second and a
+  // half of air covers the breath in and the beat after the last word.
+  const words = line.trim().split(/\s+/).length;
+  const spoken = words / 2.5;
+  return Math.min(10, Math.max(4, Math.round(spoken + 1.6)));
 }
 
 /** Rotate through the character's rooms so every video is not filmed in one corner. */

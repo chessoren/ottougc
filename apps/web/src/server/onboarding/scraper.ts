@@ -1,3 +1,5 @@
+import { collectBrandImages, findImages, type BrandImage } from "./brand-images";
+
 import "server-only";
 
 /**
@@ -30,6 +32,14 @@ export interface ScrapedPage {
   quotes: string[];
   /** Visible call-to-action labels. */
   ctas: string[];
+  /**
+   * Pictures this page publishes, not yet downloaded.
+   *
+   * Collected during the crawl because the markup around an image — its alt
+   * text, its class names, its position — is the only signal for what it is of,
+   * and that context is gone by the time the file has been fetched.
+   */
+  imageCandidates: Array<Omit<BrandImage, "url" | "bytes">>;
   wordCount: number;
 }
 
@@ -46,6 +56,8 @@ export type PageKind =
 export interface CrawlResult {
   origin: string;
   pages: ScrapedPage[];
+  /** The brand's own pictures, downloaded and kept. */
+  images: BrandImage[];
   /** Everything that went wrong, so the UI can be honest about coverage. */
   problems: string[];
   /** True when the site appears to require JavaScript to render its copy. */
@@ -83,7 +95,14 @@ export async function crawlSite(rawUrl: string): Promise<CrawlResult> {
   const origin = normaliseUrl(rawUrl);
 
   if (!origin) {
-    return { origin: rawUrl, pages: [], problems: ["Not a valid URL."], needsJavascript: false, durationMs: 0 };
+    return {
+      origin: rawUrl,
+      pages: [],
+      images: [],
+      problems: ["Not a valid URL."],
+      needsJavascript: false,
+      durationMs: 0,
+    };
   }
 
   const home = await fetchPage(origin);
@@ -91,6 +110,7 @@ export async function crawlSite(rawUrl: string): Promise<CrawlResult> {
     return {
       origin,
       pages: [],
+      images: [],
       problems: [home.error ?? "The site could not be reached."],
       needsJavascript: false,
       durationMs: Date.now() - started,
@@ -155,7 +175,37 @@ export async function crawlSite(rawUrl: string): Promise<CrawlResult> {
     );
   }
 
-  return { origin, pages, problems, needsJavascript, durationMs: Date.now() - started };
+  // Download the pictures last, once every page has been read: the same social
+  // card appears on every page, and deduplication only works across the whole
+  // crawl.
+  let images: BrandImage[] = [];
+  try {
+    const seen = new Set<string>();
+    const candidates = pages
+      .flatMap((page) => page.imageCandidates)
+      .filter((candidate) => {
+        if (seen.has(candidate.sourceUrl)) return false;
+        seen.add(candidate.sourceUrl);
+        return true;
+      });
+    images = await collectBrandImages(candidates, slugOf(origin));
+    if (images.length === 0 && candidates.length > 0) {
+      problems.push("Pictures were found but none could be downloaded.");
+    }
+  } catch {
+    problems.push("The site's pictures could not be collected.");
+  }
+
+  return { origin, pages, images, problems, needsJavascript, durationMs: Date.now() - started };
+}
+
+/** A stable folder name per site, so a re-crawl overwrites rather than piles up. */
+function slugOf(origin: string): string {
+  try {
+    return new URL(origin).hostname.replace(/^www\./, "").replace(/[^a-z0-9.-]/gi, "-");
+  } catch {
+    return "brand";
+  }
 }
 
 /* ── Fetch ───────────────────────────────────────────────────────────────── */
@@ -227,6 +277,7 @@ function parsePage(url: string, html: string, kind: PageKind): ScrapedPage {
     faqs: extractFaqs(headings, paragraphs),
     quotes: extractQuotes(stripped),
     ctas: dedupe(ctas).slice(0, 12),
+    imageCandidates: findImages(html, url),
     wordCount: text.split(/\s+/).filter(Boolean).length,
   };
 }

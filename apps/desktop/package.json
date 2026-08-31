@@ -1,0 +1,15 @@
+{
+  "name": "@ottougc/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OttoUGC as a desktop app: the fleet runs on your own machine, on its own clock.",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "package": "electron-builder --mac --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1"
+  }
+}

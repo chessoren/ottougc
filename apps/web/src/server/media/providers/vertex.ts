@@ -9,6 +9,7 @@ import { env } from "@/lib/env";
 import { GENERATED_ROOT } from "@/lib/paths";
 
 import { estimateAlignment } from "./mock";
+import { generateNanoBananaImages } from "./nano-banana";
 import {
   MEDIA_PRICING,
   type AlignmentResult,
@@ -27,8 +28,8 @@ import {
  * Live Google media stack.
  *
  *   Veo 3.1        — avatar and B-roll clips (long-running operation)
- *   Imagen 4 /     — stills, carousel slides, photo series
- *   Gemini Image
+ *   Nano Banana    — stills, character references, storyboard panels
+ *                    (delegated to ./nano-banana; Imagen is unavailable here)
  *   Lyria          — adaptive music with a beat grid
  *   Chirp 3 HD     — narration
  *   Speech-to-Text — word-level timings for kinetic captions
@@ -177,52 +178,17 @@ export class VertexMediaProvider implements MediaProvider {
     };
   }
 
-  async generateImages(req: ImageRequest): Promise<MediaAsset[]> {
-    const model = req.hiFi ? env.models.imageHiFi : env.models.image;
-    const count = req.count ?? 1;
-
-    const res = await genai().models.generateImages({
-      model,
-      prompt: req.prompt,
-      config: {
-        numberOfImages: count,
-        aspectRatio: req.aspectRatio,
-        personGeneration: "allow_adult" as never,
-        seed: req.seed,
-        includeRaiReason: true,
-      },
-    });
-
-    const images = res.generatedImages ?? [];
-    if (images.length === 0) {
-      throw new Error("No image generated, most likely filtered by safety.");
-    }
-
-    const out: MediaAsset[] = [];
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i]!;
-      if (img.raiFilteredReason) continue;
-      const bytes = img.image?.imageBytes;
-      if (!bytes) continue;
-      const id = hash(`${req.prompt}#${req.seed ?? 0}#${i}`);
-      const saved = await saveBase64("images", id, "png", bytes);
-      out.push({
-        url: saved.url,
-        localPath: saved.file,
-        mimeType: "image/png",
-        provider: "vertex",
-        model,
-        costUsd: req.hiFi ? MEDIA_PRICING.imageHiFiPerImage : MEDIA_PRICING.imagePerImage,
-        width: req.aspectRatio === "9:16" ? 1080 : 1080,
-        height: req.aspectRatio === "9:16" ? 1920 : 1080,
-        meta: { prompt: req.prompt, enhancedPrompt: img.enhancedPrompt },
-      });
-    }
-
-    if (out.length === 0) {
-      throw new Error("Toutes les images ont été filtrées par la modération Google.");
-    }
-    return out;
+  /**
+   * Images go to Nano Banana, never to Imagen.
+   *
+   * Imagen is not available on this account — five published model ids all
+   * return 404 — and the Gemini image models refuse the `predict` endpoint that
+   * `models.generateImages()` uses. `generateNanoBananaImages` calls
+   * `generateContent` instead, which is also what lets reference images be
+   * passed in and the character hold its face.
+   */
+  generateImages(req: ImageRequest): Promise<MediaAsset[]> {
+    return generateNanoBananaImages(req);
   }
 
   /**
@@ -348,7 +314,10 @@ export class VertexMediaProvider implements MediaProvider {
       config: {
         encoding: "LINEAR16",
         sampleRateHertz: 48000,
-        languageCode: "fr-FR",
+        // The product, its scenarios and its scripts are all in English.
+        // Aligning English audio against a French model returns zero words, which
+        // silently fell back to an estimate and put every caption off the beat.
+        languageCode: "en-US",
         enableWordTimeOffsets: true,
         enableAutomaticPunctuation: true,
         model: "latest_long",

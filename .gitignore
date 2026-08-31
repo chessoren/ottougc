@@ -18,3 +18,5 @@ apps/video/public/generated
 coverage
 .pglite
 **/.pglite
+# Snapshots of a database that failed to open, kept for recovery, never committed.
+**/.pglite-*

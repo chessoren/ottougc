@@ -103,7 +103,25 @@ export function resolveTransform(effects: Effect[], localMs: number, durationMs:
  * Map a timeline instant to a position inside the source media, honouring speed
  * ramps and freeze holds.
  */
-export function resolveSourceTime(effects: Effect[], localMs: number): number {
+export function resolveSourceTime(
+  effects: Effect[],
+  localMs: number,
+  options: { carriesAudio?: boolean; sourceDurationMs?: number } = {},
+): number {
+  // A clip whose own audio is the performance cannot be time-warped.
+  //
+  // Both of these effects move the picture without moving the sound: `speed`
+  // runs the frames at a different rate than the audio track, and `freeze`
+  // holds a frame while the voice carries on underneath it. With Veo that was
+  // harmless, because the picture was silent and the voice lived on its own
+  // track. With Omni the dialogue is *inside* the clip, and the result is a
+  // mouth that stops moving mid-sentence — which is exactly what a viewer reads
+  // as a broken video.
+  //
+  // The transform effects — punch-in, shake, ken burns, colour — are untouched:
+  // they change how the frame looks, not which frame it is.
+  if (options.carriesAudio) return clampToSource(localMs, options.sourceDurationMs);
+
   let t = localMs;
   for (const e of effects) {
     if (e.type === "speed") t = t * e.rate;
@@ -112,7 +130,19 @@ export function resolveSourceTime(effects: Effect[], localMs: number): number {
       else if (localMs > e.atMs) t = e.atMs;
     }
   }
-  return Math.max(0, t);
+  return clampToSource(t, options.sourceDurationMs);
+}
+
+/**
+ * Never ask for a frame past the end of the file.
+ *
+ * `speed` at any rate above 1 walks off the end of the source before the clip
+ * is over, and the player answers by holding the last frame — a freeze nobody
+ * asked for, at the worst possible moment, right before the cut.
+ */
+function clampToSource(t: number, sourceDurationMs?: number): number {
+  const upper = sourceDurationMs && sourceDurationMs > 0 ? sourceDurationMs - 40 : Infinity;
+  return Math.min(Math.max(0, t), upper);
 }
 
 /** Entry transition, expressed as an extra transform over the first frames. */

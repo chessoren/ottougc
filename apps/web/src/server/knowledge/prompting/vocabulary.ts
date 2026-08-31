@@ -171,6 +171,34 @@ export const NEGATIVE_SETS = {
     "props arranged neatly",
   ],
   ANTI_TEXT: ["subtitles", "captions", "watermark", "text overlay", "burnt-in text", "letterboxing"],
+  /**
+   * The camera is the phone. It is never *in* the picture.
+   *
+   * This set exists because of an observed failure, not a category: a clip whose
+   * prompt said "filmed on their own phone" came back with a fully rendered
+   * iPhone camera app painted over the image — shutter button, mode tabs, and
+   * garbled labels reading "FENTO VIDEO MATEO PHOTO FORMOTO". `ANTI_TEXT` was
+   * already applied and did not stop it, because the model did not classify a
+   * user interface as text. Every entry below names something that was actually
+   * seen in a rejected frame.
+   */
+  ANTI_UI: [
+    "phone screen",
+    "camera app interface",
+    "camera viewfinder overlay",
+    "shutter button",
+    "record button",
+    "recording indicator",
+    "on-screen buttons",
+    "app user interface",
+    "status bar",
+    "battery icon",
+    "timestamp overlay",
+    "picture-in-picture inset",
+    "screenshot of a phone",
+    "mockup",
+    "device frame",
+  ],
 } as const;
 export type NegativeSet = keyof typeof NEGATIVE_SETS;
 

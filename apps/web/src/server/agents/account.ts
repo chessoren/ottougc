@@ -53,6 +53,12 @@ ${context.objectivesSummary}
 BRAND
 ${context.brandSummary}
 
+${
+    options.scenarioId
+      ? `THE OPERATOR HAS ASKED FOR SCENARIO ${options.scenarioId} TODAY. Film that one — pass it to produce_video. You still choose everything else: what happens, what is said, when it goes out.`
+      : ""
+  }
+
 Make today's video. Follow your order: memory, targets, performance, channel health,
 scenario, script, generate, cut, check, render, schedule, memory.
 
@@ -69,9 +75,11 @@ what gets somebody out of it — once, late, in passing.
     system: ACCOUNT_SYSTEM,
     prompt,
     tools: toolsFor("ACCOUNT"),
-    maxSteps: 70,
+    maxSteps: 40,
     temperature: 0.95,
-    usePipeline: true,
+    // The agent runs its own loop. The pipeline below is the fallback for when
+    // there is no model or the budget is gone — not the default path it used to
+    // be, which is what made this "agent" a function call with a prompt attached.
     fallback: (ctx) => produceDeterministically(channelId, ctx, options),
   });
 }

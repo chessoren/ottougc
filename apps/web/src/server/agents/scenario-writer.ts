@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getBrain, DEGRADED_MARKER } from "@/server/llm/client";
+import { extractJson } from "./runtime";
 import type { CharacterSheet, Icp } from "@/server/knowledge/prompting/character";
 import type { Scenario, ScenarioBeat } from "@/server/knowledge/scenarios";
 import { countWords } from "@/server/knowledge/text";
@@ -42,6 +43,8 @@ export interface WrittenScenario {
   /** Posted and pinned within ninety seconds of publication. */
   pinnedComment: string;
   degraded: boolean;
+  /** Why the model did not write this, when it did not. Surfaced in the run. */
+  writerFailure?: string;
 }
 
 const WRITER_SYSTEM = `
@@ -122,28 +125,76 @@ export interface WriteInput {
 export async function writeScenario(input: WriteInput): Promise<WrittenScenario> {
   const brain = getBrain();
   const { scenario } = input;
+  let writerFailure: string | null = null;
+  let correction = "";
 
   if (brain.kind === "gemini") {
-    try {
-      const res = await brain.generate({
-        system: WRITER_SYSTEM,
-        temperature: 1.0,
-        responseSchema: SCHEMA as unknown as Record<string, unknown>,
-        messages: [{ role: "user", text: buildBrief(input) }],
-      });
+    // Two attempts, the second with a much larger budget.
+    //
+    // The first version of this swallowed every failure into a silent fallback,
+    // and the fallback is convincing enough that nobody noticed the model had
+    // stopped writing: the videos still shipped, assembled from templates, and
+    // the run summary said "media may still be live" rather than "the writer
+    // did not run". A creative step that fails quietly is worse than one that
+    // fails loudly, because it never gets fixed.
+    for (const [attempt, maxOutputTokens] of [
+      [1, 16384],
+      [2, 32768],
+    ] as const) {
+      try {
+        const res = await brain.generate({
+          system: WRITER_SYSTEM,
+          temperature: 1.0,
+          maxOutputTokens,
+          responseSchema: SCHEMA as unknown as Record<string, unknown>,
+          messages: [{ role: "user", text: buildBrief(input) + correction }],
+        });
 
-      if (res.text && res.text !== DEGRADED_MARKER) {
-        const parsed = JSON.parse(res.text) as Partial<WrittenScenario> & {
-          beats?: Array<Partial<WrittenBeat>>;
-        };
+        if (!res.text || res.text === DEGRADED_MARKER) {
+          writerFailure = `attempt ${attempt}: the model returned nothing (thinking probably consumed the ${maxOutputTokens}-token budget)`;
+          continue;
+        }
+
+        // Tolerant rather than strict: a truncated or fenced response is
+        // recoverable, and a thrown parse error is not.
+        const parsed = extractJson(res.text) as
+          | (Partial<WrittenScenario> & { beats?: Array<Partial<WrittenBeat>> })
+          | null;
+
+        if (!parsed || !Array.isArray(parsed.beats) || parsed.beats.length === 0) {
+          writerFailure = `attempt ${attempt}: the response had no usable beats`;
+          continue;
+        }
+
+        // Check the figures here, where a rejection costs one model call, rather
+        // than in quality control, where it costs the whole video.
+        const allowed = allowedFigures(input);
+        const spoken = [
+          parsed.hook ?? "",
+          ...(parsed.beats ?? []).flatMap((b) => [b?.line ?? "", b?.overlayText ?? ""]),
+        ].join(" \n ");
+        const invented = unconfirmedFigures(spoken, allowed);
+
+        if (invented.length > 0 && attempt === 1) {
+          writerFailure = `attempt 1 used figures the brand never published: ${invented.join(", ")}`;
+          correction = `\n\nYou used ${invented.map((f) => `"${f}"`).join(", ")}, which appear nowhere in the brand material. Rewrite WITHOUT them. Either use a figure that is in the material above, word for word, or say it without a number at all — "barely anything", "a couple of weeks". A number you invented is the one thing that gets this account taken down.`;
+          continue;
+        }
+
+        if (invented.length > 0) {
+          writerFailure = `shipped with unverified figures: ${invented.join(", ")}`;
+        }
+
         return normalise(parsed, input, false);
+      } catch (error) {
+        writerFailure = `attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`;
       }
-    } catch {
-      // fall through to the template filler
     }
   }
 
-  return normalise({}, input, true);
+  const written = normalise({}, input, true);
+  if (writerFailure) written.writerFailure = writerFailure;
+  return written;
 }
 
 function buildBrief(input: WriteInput): string {
@@ -201,6 +252,68 @@ ${beatBrief}
 
 Write it.
 `.trim();
+}
+
+/* ── The number gate ─────────────────────────────────────────────────────── */
+
+/**
+ * Every figure a script is allowed to contain.
+ *
+ * Drawn from the brand's own confirmed material and nowhere else. Small counting
+ * numbers are exempt — "three weeks", "two people" — because forbidding those
+ * makes speech impossible without adding any protection: nobody is misled by
+ * "the second time".
+ */
+function allowedFigures(input: WriteInput): Set<string> {
+  const corpus = [
+    ...Object.values(input.brandDna ?? {}),
+    ...input.knowledge.map((k) => `${k.title} ${k.body}`),
+  ].join(" ");
+  return new Set(corpus.match(/\d[\d,.\s]*\d|\d/g)?.map(normaliseFigure) ?? []);
+}
+
+function normaliseFigure(raw: string): string {
+  return raw.replace(/[\s,]/g, "").replace(/\.$/, "");
+}
+
+/** Written-out numbers are numbers. A model asked to avoid "4,000" writes "four thousand". */
+const WORD_NUMBERS: Record<string, string> = {
+  zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6",
+  seven: "7", eight: "8", nine: "9", ten: "10", eleven: "11", twelve: "12",
+  fifteen: "15", twenty: "20", thirty: "30", forty: "40", fifty: "50",
+  hundred: "100", thousand: "1000", grand: "1000", million: "1000000",
+};
+
+/**
+ * Figures a script uses that the brand never published.
+ *
+ * This runs before a single frame is generated. Without it the same claim is
+ * caught by quality control *after* the storyboard, the footage and the render
+ * have been paid for — which is exactly what happened twice in a row, at about
+ * three dollars a time, for one invented "twelve signups".
+ */
+export function unconfirmedFigures(text: string, allowed: Set<string>): string[] {
+  const found: string[] = [];
+
+  for (const match of text.match(/\$?\d[\d,.]*\d|\$?\d+/g) ?? []) {
+    const bare = normaliseFigure(match.replace("$", ""));
+    // Under a hundred with no currency marker is counting, not claiming.
+    if (!match.includes("$") && Number(bare) < 100) continue;
+    if (allowed.has(bare)) continue;
+    found.push(match);
+  }
+
+  // "two thousand dollars", "four thousand views"
+  const spelled = text.toLowerCase().match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)[\s-](hundred|thousand|grand|million)\b/g,
+  );
+  for (const phrase of spelled ?? []) {
+    const [unit, scale] = phrase.split(/[\s-]/);
+    const value = String(Number(WORD_NUMBERS[unit!] ?? 0) * Number(WORD_NUMBERS[scale!] ?? 1));
+    if (!allowed.has(value)) found.push(phrase);
+  }
+
+  return [...new Set(found)];
 }
 
 function normalise(

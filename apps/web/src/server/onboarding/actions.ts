@@ -29,13 +29,21 @@ export interface ScanResult {
   brief?: CompanyBrief;
   /** Pages actually read, for the "here's what we looked at" line. */
   pagesRead: number;
+  /** How many of the brand's own pictures we came back with. */
+  imagesFound: number;
   deep: boolean;
 }
 
 export async function scanSiteAction(rawUrl: string): Promise<ScanResult> {
   const url = normaliseUrl(rawUrl);
   if (!url) {
-    return { ok: false, error: "That doesn't look like a web address.", pagesRead: 0, deep: false };
+    return {
+      ok: false,
+      error: "That doesn't look like a web address.",
+      pagesRead: 0,
+      imagesFound: 0,
+      deep: false,
+    };
   }
 
   const crawl = await crawlSite(url);
@@ -44,12 +52,19 @@ export async function scanSiteAction(rawUrl: string): Promise<ScanResult> {
       ok: false,
       error: crawl.problems[0] ?? "We couldn't reach that site.",
       pagesRead: 0,
+      imagesFound: 0,
       deep: false,
     };
   }
 
   const brief = await buildBrief(crawl);
-  return { ok: true, brief, pagesRead: crawl.pages.length, deep: brief.deep };
+  return {
+    ok: true,
+    brief,
+    pagesRead: crawl.pages.length,
+    imagesFound: brief.images.length,
+    deep: brief.deep,
+  };
 }
 
 export interface SaveBriefResult {
@@ -105,6 +120,11 @@ export async function saveBriefAction(input: {
     hookLine: value("chore"),
   };
 
+  // The brand's own pictures, kept where production can reach them. A proof beat
+  // that needs the product on screen now has something true to put there instead
+  // of a generated interface.
+  const brandImages = input.brief.images ?? [];
+
   const claimsPolicy = {
     allowed: confirmedClaims.map((c) => c.text),
     forbidden: [
@@ -126,7 +146,7 @@ export async function saveBriefAction(input: {
     targetUrl: input.answers.targetUrl || url,
     tagline: value("whatItDoes"),
     onboardingAnswers: { ...input.answers, brief: input.brief } as never,
-    brandDna: brandDna as never,
+    brandDna: { ...brandDna, images: brandImages } as never,
     claimsPolicy: claimsPolicy as never,
     onboardingCompletedAt: new Date(),
     channelQuota: input.channelCount,

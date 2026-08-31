@@ -121,7 +121,11 @@ const ClipRenderer: React.FC<{ clip: VideoClip }> = ({ clip }) => {
     willChange: "transform",
   };
 
-  const sourceMs = resolveSourceTime(clip.effects, localMs) + clip.sourceInMs;
+  const sourceMs =
+    resolveSourceTime(clip.effects, localMs, {
+      carriesAudio: clip.audioGain > 0,
+      sourceDurationMs: clip.durationMs,
+    }) + clip.sourceInMs;
   const src = clip.kind === "color" ? clip.src : resolveSrc(clip.src);
 
   return (
@@ -136,8 +140,11 @@ const ClipRenderer: React.FC<{ clip: VideoClip }> = ({ clip }) => {
             src={src}
             style={inner}
             startFrom={Math.round((sourceMs / 1000) * fps)}
-            // Video audio is never used: the mix is authored on the audio track.
-            muted
+            // The clip's own audio is the performance when Omni generated the
+            // dialogue with the picture. `audioGain` decides: 0 for a silent
+            // reaction, low for a bed under a voice-over, full for sync speech.
+            muted={clip.audioGain === 0}
+            volume={clip.audioGain}
           />
         )}
       </div>

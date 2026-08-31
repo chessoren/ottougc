@@ -117,7 +117,7 @@ cast ten creators              write the scene against real brand material
 | `server/agents` | Agent runtime, and the agents: manager, account, QA, analyst, weekly review. |
 | `server/agents/tools` | What the model can call: knowledge, memory, strategy, generation, **editing**, publishing, analytics. |
 | `server/edit` | The editing timeline: intermediate representation, validation, rule-based editor. |
-| `server/media` | Gemini Omni Flash, Imagen, Lyria, Chirp — and the labelled stand-in provider. |
+| `server/media` | Gemini Omni Flash for video, **Nano Banana 2** for stills, Lyria, Chirp — and the labelled stand-in provider. Imagen is not used: it is unavailable on the account and the Gemini image models refuse the endpoint the SDK's `generateImages` calls. |
 | `server/darwin` | Scoring, the decision grid, Thompson sampling, drop-off diagnosis. |
 | `server/integrations` | YouTube: OAuth, upload, analytics, comments, **quota sharding**. |
 | `apps/video` | The Remotion project: **one generic composition** that renders any timeline. |
@@ -127,14 +127,32 @@ Four decisions are explained in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
 1. **A timeline, not templates.** The agent performs editing operations on an
    intermediate representation, which is what lets it invent a cut the taxonomy
    never described.
-2. **The YouTube quota is the real constraint**, not the AI. Six uploads a day
-   per Google Cloud project. Multi-project routing is built in.
+2. **The YouTube quota used to be the real constraint.** Uploads cost 1 600 units
+   out of 10 000, so a project could publish six videos a day. Since 1 June 2026
+   `videos.insert` has its own bucket — 1 unit, 100 calls a day — and multi-project
+   routing became an optimisation rather than a necessity.
 3. **Quality control fails closed.** An unlabelled screen recording is treated as
    a stand-in, and a proof scenario with no proof does not publish.
 4. **Degradation is explicit.** Every integration has a fallback, and every
    fallback is visible in Settings.
 
 ---
+
+## Running it on your own machine
+
+```bash
+pnpm desktop
+```
+
+Builds the web app and opens it in a desktop shell that keeps the fleet on its
+own clock: creators make the day's video at 07:00, publishing runs every half
+hour, metrics hourly, the day is analysed at 23:30 and the manager reviews the
+whole fleet on Monday morning. Everything is also on the Fleet menu, by hand.
+
+The shell exists because the loop does not fit serverless — one Omni shot takes
+forty seconds, a render pins Chromium for minutes, and the media is hundreds of
+megabytes. See [`docs/RUNTIME.md`](docs/RUNTIME.md), which also explains the one
+rule it enforces: exactly one process owns the database.
 
 ## What's true today
 
@@ -148,6 +166,11 @@ Four decisions are explained in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
 - The decision engine issues numbered verdicts and updates its posteriors.
 - The weekly review decides each channel's fate and reallocates cadence.
 - YouTube posting is implemented and tested in dry run.
+- Every shot is drawn as a storyboard panel first, checked by a vision model, and
+  then animated — so the frame is decided in stills, where a rejection costs
+  thirteen cents instead of sixty.
+- Captions are read back off the clip's own audio, so they match what the model
+  actually said rather than what the script asked for.
 
 ## What's still to wire
 

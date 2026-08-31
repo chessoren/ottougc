@@ -35,6 +35,14 @@ export interface Claim {
 }
 
 export interface CompanyBrief {
+  /**
+   * The brand's own pictures, already downloaded.
+   *
+   * Kept on the brief rather than fetched later so the onboarding can show them
+   * back — "here is what we found" is far more convincing than a progress bar —
+   * and so a video that needs to show the product has something true to show.
+   */
+  images: import("./brand-images").BrandImage[];
   name: BriefField;
   /** One plain sentence. No adjectives, no category words. */
   whatItDoes: BriefField;
@@ -327,6 +335,7 @@ function assemble(
     .slice(0, 5);
 
   return {
+    images: crawl.images,
     name: field(name, sources[0]?.url ?? crawl.origin),
     whatItDoes: field(str("whatItDoes"), "home page", shallow.whatItDoes || tagline),
     audience: field(str("audience"), "home page", shallow.audience),

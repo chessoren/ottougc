@@ -266,6 +266,9 @@ export const addClip: AgentTool = {
       layout: (args.layout ?? { mode: "full" }) as VideoClip["layout"],
       fit: "cover" as const,
       opacity: 1,
+      // A clip the agent adds by hand is b-roll under an existing mix, so it
+      // comes in silent. Speech-carrying clips are placed by the composer.
+      audioGain: 0,
       effects: [],
       transitionIn: { type: "cut" as const, durationMs: 0, direction: "left" as const },
       note: args.note,
@@ -279,7 +282,7 @@ export const addClip: AgentTool = {
 export const applyEffect: AgentTool = {
   name: "apply_effect",
   description:
-    "Applies an effect. punchIn = a scale break on one syllable, the most useful of these, placed on impact words and numbers. kenBurns = continuous drift. freeze = hold on a result. glitch = attention reset. speed = speeds up a screen recording. color = desaturates the 'before' side of a comparison.",
+    "Applies an effect. punchIn = a scale break on one syllable, the most useful of these, placed on impact words and numbers. kenBurns = continuous drift. glitch = attention reset. color = desaturates the 'before' side of a comparison. shake = handheld energy. freeze and speed hold or time-warp the picture and are REFUSED on any shot that carries spoken dialogue, because the voice does not warp with it.",
   parameters: {
     type: "object",
     properties: {
@@ -329,6 +332,17 @@ export const applyEffect: AgentTool = {
         error: `Effet invalide : ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" | ")}`,
       };
     }
+    // Two effects move the picture without moving the sound, and this clip's
+    // sound is somebody speaking. Refused with the reason, so the agent can pick
+    // a different effect rather than silently shipping a mouth that stops
+    // moving mid-sentence.
+    if (clip.audioGain > 0 && (parsed.data.type === "speed" || parsed.data.type === "freeze")) {
+      return {
+        error: `"${parsed.data.type}" cannot be applied to ${args.clipId}: this shot carries its own dialogue, and time-warping the picture desynchronises it from the voice.`,
+        hint: "punchIn, kenBurns, shake, glitch and color all work here — they change how the frame looks, not which frame it is.",
+      };
+    }
+
     clip.effects.push(parsed.data);
     return { applied: true, effectCount: clip.effects.length, ...report(ctx.runId) };
   },

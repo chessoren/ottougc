@@ -47,12 +47,20 @@ export function Nav() {
 export function Logo({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden>
-      <rect width="28" height="28" rx="9" fill="var(--color-inverse)" />
-      {/* Three bars of unequal length: most posts small, one very large — the
-          outlier distribution the whole product is built on. */}
-      <rect x="7" y="8" width="6" height="3" rx="1.5" fill="var(--color-accent)" />
-      <rect x="7" y="12.5" width="14" height="3" rx="1.5" fill="white" />
-      <rect x="7" y="17" width="9" height="3" rx="1.5" fill="var(--color-accent)" opacity="0.55" />
+      <defs>
+        <linearGradient id="otto-ground" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#232326" />
+          <stop offset="100%" stopColor="#0E0E10" />
+        </linearGradient>
+      </defs>
+      <rect width="28" height="28" rx="8.2" fill="url(#otto-ground)" />
+      {/* Three bars of unequal length: most posts go nowhere and one carries the
+          month — the outlier distribution the whole product is built on. The
+          winner is the one in colour, and it is the only one that reaches the
+          full width of the frame. Same mark as the desktop icon. */}
+      <rect x="6.4" y="8.1" width="6.4" height="3.2" rx="1.6" fill="white" opacity="0.42" />
+      <rect x="6.4" y="12.4" width="15.2" height="3.2" rx="1.6" fill="var(--color-accent)" />
+      <rect x="6.4" y="16.7" width="9.6" height="3.2" rx="1.6" fill="white" opacity="0.42" />
     </svg>
   );
 }

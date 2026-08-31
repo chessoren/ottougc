@@ -45,6 +45,13 @@ export interface VideoClip {
     direction: "left" | "right" | "up" | "down";
   };
   opacity: number;
+  /**
+   * Volume of the clip's own audio, 0 to 2.
+   *
+   * Omni renders the dialogue inside the clip, so for a talking shot this is the
+   * whole soundtrack. Mirrors `videoClipSchema.audioGain` in the web app.
+   */
+  audioGain: number;
   note?: string;
 }
 

@@ -60,6 +60,14 @@ export interface RunOptions {
   usePipeline?: boolean;
 }
 
+/** A function response must be a JSON object, never a bare array or scalar. */
+function asResponse(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return { output: value };
+}
+
 /** Mulberry32 — small, fast, seedable. */
 function makeRng(seed: number): () => number {
   let a = seed >>> 0;
@@ -230,10 +238,26 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
 
       if (res.functionCalls.length === 0) break;
 
-      // Replay the model's calls into the transcript so the next turn has context.
-      for (const call of res.functionCalls) {
-        messages.push({ role: "model", functionCall: { name: call.name, args: call.args } });
+      // Replay the model's turn into the transcript so the next request has
+      // context — verbatim, because Gemini 3.x rejects a function call whose
+      // thought signature has been stripped by rebuilding it from name and args.
+      if (res.modelParts?.length) {
+        messages.push({ role: "model", parts: res.modelParts });
+      } else {
+        for (const call of res.functionCalls) {
+          messages.push({ role: "model", functionCall: { name: call.name, args: call.args } });
+        }
       }
+
+      // Gemini requires the responses for a turn to come back as ONE user turn
+      // with exactly as many function-response parts as the turn had calls:
+      //
+      //   "Please ensure that the number of function response parts is equal to
+      //    the number of function call parts of the function call turn."
+      //
+      // So results are accumulated here and pushed once, rather than a message
+      // per tool.
+      const responseParts: unknown[] = [];
 
       for (const call of res.functionCalls) {
         const tool = toolMap.get(call.name);
@@ -248,7 +272,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
             isError: true,
             durationMs: Date.now() - started,
           });
-          messages.push({ role: "user", functionResponse: { name: call.name, response: errorResult } });
+          responseParts.push({ functionResponse: { name: call.name, response: errorResult } });
           toolCalls.push({ name: call.name, args: call.args, result: errorResult, isError: true });
           continue;
         }
@@ -258,7 +282,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
             error: `A ${opts.kind} agent is not allowed to call ${call.name}.`,
           };
           await step("TOOL_RESULT", { tool: call.name, result: errorResult, isError: true });
-          messages.push({ role: "user", functionResponse: { name: call.name, response: errorResult } });
+          responseParts.push({ functionResponse: { name: call.name, response: errorResult } });
           toolCalls.push({ name: call.name, args: call.args, result: errorResult, isError: true });
           continue;
         }
@@ -270,7 +294,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
             result,
             durationMs: Date.now() - started,
           });
-          messages.push({ role: "user", functionResponse: { name: call.name, response: result } });
+          responseParts.push({ functionResponse: { name: call.name, response: asResponse(result) } });
           toolCalls.push({ name: call.name, args: call.args, result, isError: false });
         } catch (err) {
           // Budget exhaustion ends the run; anything else is fed back so the
@@ -284,10 +308,12 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
             isError: true,
             durationMs: Date.now() - started,
           });
-          messages.push({ role: "user", functionResponse: { name: call.name, response: errorResult } });
+          responseParts.push({ functionResponse: { name: call.name, response: errorResult } });
           toolCalls.push({ name: call.name, args: call.args, result: errorResult, isError: true });
         }
       }
+
+      messages.push({ role: "user", parts: responseParts });
     }
 
     const output = extractJson(finalText);

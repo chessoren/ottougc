@@ -2,6 +2,7 @@ import { ANALYTICS_TOOLS } from "./analytics";
 import { EDITING_TOOLS } from "./editing";
 import { KNOWLEDGE_TOOLS } from "./knowledge";
 import { MEDIA_TOOLS } from "./media";
+import { PRODUCTION_TOOLS } from "./production";
 import { PUBLISHING_TOOLS } from "./publishing";
 import { STRATEGY_TOOLS } from "./strategy";
 import type { AgentKind, AgentTool } from "../types";
@@ -9,6 +10,7 @@ import type { AgentKind, AgentTool } from "../types";
 export const ALL_TOOLS: AgentTool[] = [
   ...KNOWLEDGE_TOOLS,
   ...STRATEGY_TOOLS,
+  ...PRODUCTION_TOOLS,
   ...MEDIA_TOOLS,
   ...EDITING_TOOLS,
   ...PUBLISHING_TOOLS,
@@ -29,11 +31,13 @@ export const TOOLSETS: Record<AgentKind, AgentTool[]> = {
   MANAGER: [
     ...KNOWLEDGE_TOOLS,
     ...STRATEGY_TOOLS,
+    ...PRODUCTION_TOOLS.filter((t) => t.name === "list_scenarios"),
     ...ANALYTICS_TOOLS,
     ...PUBLISHING_TOOLS.filter((t) => t.name === "check_publish_capacity"),
   ],
   ACCOUNT: [
     ...KNOWLEDGE_TOOLS,
+    ...PRODUCTION_TOOLS,
     ...MEDIA_TOOLS,
     ...EDITING_TOOLS,
     ...PUBLISHING_TOOLS,
@@ -69,6 +73,7 @@ export function toolsFor(kind: AgentKind): AgentTool[] {
 
 export * from "./knowledge";
 export * from "./strategy";
+export * from "./production";
 export * from "./media";
 export * from "./editing";
 export * from "./publishing";

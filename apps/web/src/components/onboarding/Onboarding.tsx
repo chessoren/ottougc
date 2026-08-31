@@ -348,9 +348,45 @@ function Scanning({ url }: { url: string }) {
         "Opening your home page",
         "Looking for pricing, about and FAQ",
         "Pulling out every number you publish",
+        "Saving your screenshots",
         "Writing your brief",
       ]}
     />
+  );
+}
+
+/**
+ * What we found on the site, shown back.
+ *
+ * Two jobs. It proves the crawl was real — a row of the company's own
+ * screenshots is far more convincing than a filled progress bar — and these are
+ * the pictures production will reach for when a beat needs the product on
+ * screen, which is how a proof shot stops being a generated interface.
+ */
+function BrandImageStrip({ images }: { images: CompanyBrief["images"] }) {
+  return (
+    <div className="mx-auto mt-8 max-w-[760px]">
+      <p className="mb-3 text-sm font-semibold text-ink-subtle">
+        Your own pictures, kept for the videos
+      </p>
+      <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-2">
+        {images.slice(0, 8).map((image) => (
+          <div
+            key={image.url}
+            className="relative h-[92px] w-[150px] shrink-0 overflow-hidden rounded-lg border border-line bg-surface-2"
+            title={image.caption ?? image.sourceUrl}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={image.url}
+              alt={image.caption ?? ""}
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -444,6 +480,7 @@ function BriefStep({
         <Badge tone="win">
           <Check size={12} strokeWidth={3} />
           Read {pagesRead} {pagesRead === 1 ? "page" : "pages"}
+          {brief.images.length > 0 ? ` · ${brief.images.length} pictures` : ""}
         </Badge>
         <h1 className="mx-auto mt-6 max-w-[18ch] text-4xl md:text-5xl">
           Here&rsquo;s what we understood.
@@ -453,6 +490,8 @@ function BriefStep({
           worth thirty seconds.
         </p>
       </div>
+
+      {brief.images.length > 0 ? <BrandImageStrip images={brief.images} /> : null}
 
       <div className="mx-auto mt-10 grid max-w-[760px] gap-3">
         {BRIEF_CARDS.map((card) => {

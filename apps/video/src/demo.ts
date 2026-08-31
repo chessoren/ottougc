@@ -27,6 +27,8 @@ export const DEMO_TIMELINE: Timeline = {
       layer: 0,
       layout: { mode: "full" },
       fit: "cover",
+      // Colour cards: no source audio to let through.
+      audioGain: 0,
       opacity: 1,
       effects: [
         { type: "kenBurns", fromScale: 1.18, toScale: 1.02, fromX: 0, toX: 0, fromY: 0, toY: 0, easing: "easeOut" },
@@ -45,6 +47,8 @@ export const DEMO_TIMELINE: Timeline = {
       layer: 0,
       layout: { mode: "full" },
       fit: "cover",
+      // Colour cards: no source audio to let through.
+      audioGain: 0,
       opacity: 1,
       effects: [
         { type: "kenBurns", fromScale: 1.0, toScale: 1.06, fromX: 0, toX: 0, fromY: 0, toY: -20, easing: "linear" },
@@ -63,6 +67,8 @@ export const DEMO_TIMELINE: Timeline = {
       layer: 0,
       layout: { mode: "full" },
       fit: "cover",
+      // Colour cards: no source audio to let through.
+      audioGain: 0,
       opacity: 1,
       effects: [
         { type: "kenBurns", fromScale: 1.05, toScale: 1.12, fromX: 0, toX: 14, fromY: 0, toY: -8, easing: "linear" },

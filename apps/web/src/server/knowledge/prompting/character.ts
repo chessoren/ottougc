@@ -1,3 +1,5 @@
+import { NEGATIVE_SETS } from "./vocabulary";
+
 /**
  * Character construction.
  *
@@ -202,6 +204,11 @@ export function compileReferencePrompt(
     "commercial",
     "watermark",
     "text",
+    // The reference set is what every later generation is conditioned on, so an
+    // interface that creeps into a reference propagates into every clip that
+    // channel ever makes. One surprised-expression reference came back with a
+    // phone held up in shot; nothing had asked for it.
+    ...NEGATIVE_SETS.ANTI_UI,
   ].join(", ");
 
   return { prompt, negativePrompt };

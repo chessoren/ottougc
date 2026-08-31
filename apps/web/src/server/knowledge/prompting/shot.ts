@@ -233,6 +233,18 @@ export function compileShot(spec: ShotSpec): CompiledPrompt {
   // it two incompatible instructions, and it will split the difference badly.
   parts.push(`${openingDeclaration(spec.archetype)} Vertical 9:16, ${spec.durationSeconds} seconds.`);
 
+  // The phone is the camera, not a prop.
+  //
+  // Without this line the model reads "filmed on their own phone" as an
+  // instruction to *depict* a phone, and renders a camera app over the image.
+  // Stating where the camera is, positively, works where the negative list
+  // alone did not.
+  if (spec.archetype !== "MIRROR" && spec.archetype !== "FOUND_FOOTAGE") {
+    parts.push(
+      "POINT OF VIEW: the camera IS the phone. We see only what its lens sees — no phone, no screen and no camera interface appear anywhere in the picture.",
+    );
+  }
+
   // 2. Who. The locked anchor.
   parts.push(`SUBJECT: ${spec.subject}`);
 
@@ -307,13 +319,19 @@ function openingDeclaration(archetype: ShotArchetype): string {
  * suppressing composition there would defeat the format. Everything else does.
  */
 function defaultNegativesFor(archetype: ShotArchetype): NegativeSet[] {
+  // Two archetypes deliberately put a device in the picture: MIRROR shows the
+  // phone in the subject's hand, and FOUND_FOOTAGE is often a screen being
+  // filmed. Applying ANTI_UI there would suppress the thing that defines them.
+  const ui: NegativeSet[] =
+    archetype === "MIRROR" || archetype === "FOUND_FOOTAGE" ? [] : ["ANTI_UI"];
+
   if (archetype === "DRAMA") {
-    return ["ANTI_COMMERCIAL", "ANTI_PLASTIC", "ANTI_TEXT"];
+    return ["ANTI_COMMERCIAL", "ANTI_PLASTIC", "ANTI_TEXT", ...ui];
   }
   if (archetype === "SCENE_TWO_HANDER") {
-    return ["ANTI_COMMERCIAL", "ANTI_PLASTIC", "ANTI_STAGED", "ANTI_TEXT"];
+    return ["ANTI_COMMERCIAL", "ANTI_PLASTIC", "ANTI_STAGED", "ANTI_TEXT", ...ui];
   }
-  return ["ANTI_COMMERCIAL", "ANTI_PLASTIC", "ANTI_CINEMA", "ANTI_STAGED", "ANTI_TEXT"];
+  return ["ANTI_COMMERCIAL", "ANTI_PLASTIC", "ANTI_CINEMA", "ANTI_STAGED", "ANTI_TEXT", ...ui];
 }
 
 /**
@@ -356,6 +374,21 @@ export function critiqueShot(spec: ShotSpec): string[] {
   if (spec.speech && /^(hey guys|hi everyone|hello everyone|what's up guys)/i.test(spec.speech.trim())) {
     problems.push(
       "The line opens with a greeting. That is disqualifying — you always enter mid-sentence.",
+    );
+  }
+  // A shot cannot both forbid an interface and be written around one.
+  //
+  // Found by the panel checker rather than by reasoning: an INSERT beat directed
+  // as "her hands turn a phone face-up on the counter" was generated with a full
+  // camera app painted on the screen and then rejected, twice, for exactly the
+  // thing the script had asked for.
+  if (
+    spec.archetype !== "MIRROR" &&
+    spec.archetype !== "FOUND_FOOTAGE" &&
+    /\b(phone|screen|laptop|tablet|monitor|display)\b/i.test(spec.action)
+  ) {
+    problems.push(
+      "The action puts a screen in frame, but this shot type forbids visible interfaces. Either film the reaction instead of the device, or use MIRROR or FOUND_FOOTAGE, where a screen is the point.",
     );
   }
   if (spec.durationSeconds < 3 || spec.durationSeconds > 10) {

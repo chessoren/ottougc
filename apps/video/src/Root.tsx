@@ -3,6 +3,7 @@ import { Composition } from "remotion";
 import { loadFont as loadMontserrat } from "@remotion/google-fonts/Montserrat";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
 
+import { AppIcon } from "./components/AppIcon";
 import { TimelineRenderer } from "./components/TimelineRenderer";
 import { EMPTY_TIMELINE, FPS, HEIGHT, WIDTH, type Timeline } from "./schema";
 import { DEMO_TIMELINE } from "./demo";
@@ -31,6 +32,18 @@ export const RemotionRoot: React.FC = () => {
             height: HEIGHT,
           };
         }}
+      />
+
+      {/* The desktop app's icon. Rendered to PNG with `renderStill`, so the mark
+          has one source of truth and no design file to keep in sync. */}
+      <Composition
+        id="AppIcon"
+        component={AppIcon as never}
+        durationInFrames={1}
+        fps={1}
+        width={1024}
+        height={1024}
+        defaultProps={{ padding: 96 }}
       />
     </>
   );
