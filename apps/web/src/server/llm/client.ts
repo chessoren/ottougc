@@ -1,12 +1,20 @@
 import "server-only";
 
-import { GoogleGenAI, type FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
+import { Agent } from "@strands-agents/sdk";
+import { GoogleModel } from "@strands-agents/sdk/models/google";
 
 import { env, capabilities, googleCredentials } from "@/lib/env";
 
 /**
- * One narrow interface over the model, so the agent runtime never touches a
+ * One narrow interface over the model, so the rest of the app never touches a
  * vendor SDK directly.
+ *
+ * Every model call goes through the Strands Agents SDK: the agent loop in
+ * `agents/runtime.ts` is a Strands `Agent` with tools, and the single-shot
+ * writers below (brief, ICP, character sheet, scenario) are tool-less Strands
+ * agents with a JSON response schema. Both share one `GoogleModel` over the
+ * Vertex AI client.
  *
  * Two implementations:
  *   - `GeminiBrain`      — Vertex AI or AI Studio, whichever is credentialed.
@@ -19,42 +27,14 @@ import { env, capabilities, googleCredentials } from "@/lib/env";
 
 export interface LlmMessage {
   role: "user" | "model";
-  /** Plain text turn. */
   text?: string;
-  /** Result of a tool the runtime executed on the model's behalf. */
-  functionResponse?: { name: string; response: unknown };
-  /** A tool call the model previously made (replayed for context). */
-  functionCall?: { name: string; args: Record<string, unknown> };
-  /**
-   * A model turn replayed **verbatim**, exactly as the API returned it.
-   *
-   * Gemini 3.x attaches a `thoughtSignature` to every function call and refuses
-   * the next request if it is missing:
-   *
-   *   "Function call is missing a thought_signature in functionCall parts.
-   *    This is required for tools to work correctly."
-   *
-   * Reconstructing the turn from `{name, args}` drops that signature, so the
-   * second step of every tool-using run failed with a 400 — which is why nothing
-   * in this codebase was able to run a real agent loop. The parts are opaque to
-   * us and must be handed back untouched.
-   */
-  parts?: unknown[];
-}
-
-export interface LlmToolDef {
-  name: string;
-  description: string;
-  /** JSON Schema object describing the arguments. */
-  parameters: Record<string, unknown>;
 }
 
 export interface LlmRequest {
   model?: string;
   system: string;
   messages: LlmMessage[];
-  tools?: LlmToolDef[];
-  /** Force a JSON object response matching this schema (no tools in this mode). */
+  /** Force a JSON object response matching this schema. */
   responseSchema?: Record<string, unknown>;
   temperature?: number;
   maxOutputTokens?: number;
@@ -64,16 +44,10 @@ export interface LlmRequest {
 
 export interface LlmResponse {
   text: string;
-  functionCalls: Array<{ name: string; args: Record<string, unknown> }>;
   usage: { inputTokens: number; outputTokens: number };
   model: string;
   /** True when produced by the deterministic fallback rather than a model. */
   degraded: boolean;
-  /**
-   * The model's turn exactly as returned, for replaying into the next request.
-   * Carries the thought signatures that Gemini 3.x requires.
-   */
-  modelParts?: unknown[];
 }
 
 export interface Brain {
@@ -102,7 +76,7 @@ export function estimateCostUsd(model: string, inputTokens: number, outputTokens
 }
 
 /* ==========================================================================
-   Gemini
+   Gemini, through Strands
    ========================================================================== */
 
 let cachedClient: GoogleGenAI | null = null;
@@ -126,81 +100,62 @@ function client(): GoogleGenAI {
   return cachedClient;
 }
 
+/** The Strands model every agent in the fleet runs on. */
+export function strandsModel(opts: {
+  modelId?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  thinkingLevel?: "LOW" | "MEDIUM" | "HIGH";
+  responseSchema?: Record<string, unknown>;
+}): GoogleModel {
+  return new GoogleModel({
+    client: client(),
+    modelId: opts.modelId ?? env.models.brain,
+    params: {
+      temperature: opts.temperature ?? 0.9,
+      // Thinking is billed out of the same budget as the answer, so a cap tuned
+      // for the answer alone returns an empty string: a "ping" costs ~112
+      // thought tokens before a single character of output. Structured writing
+      // needs room for both.
+      maxOutputTokens: opts.maxOutputTokens ?? 16384,
+      thinkingConfig: { thinkingLevel: opts.thinkingLevel ?? env.models.thinking },
+      ...(opts.responseSchema
+        ? { responseMimeType: "application/json", responseJsonSchema: opts.responseSchema }
+        : {}),
+    },
+  });
+}
+
 class GeminiBrain implements Brain {
   readonly kind = "gemini" as const;
 
   async generate(req: LlmRequest): Promise<LlmResponse> {
     const model = req.model ?? env.models.brain;
-    const ai = client();
+    const prompt = req.messages.map((m) => m.text ?? "").join("\n\n");
 
-    const contents = req.messages.map((m) => {
-      // A verbatim turn goes back untouched — signatures and all.
-      if (m.parts) return { role: m.role, parts: m.parts as never };
-      if (m.functionResponse) {
-        return {
-          role: "user" as const,
-          parts: [
-            {
-              functionResponse: {
-                name: m.functionResponse.name,
-                response: asRecord(m.functionResponse.response),
-              },
-            },
-          ],
-        };
-      }
-      if (m.functionCall) {
-        return {
-          role: "model" as const,
-          parts: [{ functionCall: { name: m.functionCall.name, args: m.functionCall.args } }],
-        };
-      }
-      return { role: m.role, parts: [{ text: m.text ?? "" }] };
-    });
+    const result = await withRetry(() =>
+      new Agent({
+        name: "ottougc-writer",
+        model: strandsModel({
+          modelId: model,
+          temperature: req.temperature,
+          maxOutputTokens: req.maxOutputTokens,
+          thinkingLevel: req.thinkingLevel,
+          responseSchema: req.responseSchema,
+        }),
+        systemPrompt: req.system,
+        printer: false,
+      }).invoke(prompt),
+    );
 
-    const config: Record<string, unknown> = {
-      systemInstruction: req.system,
-      temperature: req.temperature ?? 0.9,
-      // Thinking is billed out of the same budget as the answer, so a cap tuned
-      // for the answer alone returns an empty string: a "ping" costs ~112
-      // thought tokens before a single character of output. Structured writing
-      // needs room for both.
-      maxOutputTokens: req.maxOutputTokens ?? 16384,
-      thinkingConfig: { thinkingLevel: req.thinkingLevel ?? env.models.thinking },
-    };
-
-    if (req.tools?.length) {
-      config.tools = [
-        {
-          functionDeclarations: req.tools.map(
-            (t): FunctionDeclaration => ({
-              name: t.name,
-              description: t.description,
-              parametersJsonSchema: t.parameters,
-            }),
-          ),
-        },
-      ];
-    }
-
-    if (req.responseSchema) {
-      config.responseMimeType = "application/json";
-      config.responseJsonSchema = req.responseSchema;
-    }
-
-    const res = await withRetry(() => ai.models.generateContent({ model, contents, config }));
-
-    const usage = res.usageMetadata;
+    const usage = result.metrics?.accumulatedUsage;
     return {
-      modelParts: res.candidates?.[0]?.content?.parts as unknown[] | undefined,
-      text: res.text ?? "",
-      functionCalls: (res.functionCalls ?? []).map((fc) => ({
-        name: fc.name ?? "",
-        args: (fc.args ?? {}) as Record<string, unknown>,
-      })),
+      text: result.lastMessage.content
+        .flatMap((block) => (block.type === "textBlock" ? [block.text] : []))
+        .join(""),
       usage: {
-        inputTokens: usage?.promptTokenCount ?? 0,
-        outputTokens: usage?.candidatesTokenCount ?? 0,
+        inputTokens: usage?.inputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
       },
       model,
       degraded: false,
@@ -237,11 +192,6 @@ async function withRetry<T>(call: () => Promise<T>, attempts = 4): Promise<T> {
   throw lastError;
 }
 
-function asRecord(v: unknown): Record<string, unknown> {
-  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
-  return { output: v };
-}
-
 /* ==========================================================================
    Deterministic fallback
    ========================================================================== */
@@ -262,7 +212,6 @@ class DeterministicBrain implements Brain {
   async generate(req: LlmRequest): Promise<LlmResponse> {
     return {
       text: DEGRADED_MARKER,
-      functionCalls: [],
       usage: { inputTokens: 0, outputTokens: 0 },
       model: req.model ?? "deterministic",
       degraded: true,

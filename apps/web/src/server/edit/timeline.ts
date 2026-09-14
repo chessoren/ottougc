@@ -212,7 +212,7 @@ const textBarSchema = z.object({
       maxWidth: z.number().min(300).max(1040).default(900),
       shadow: z.boolean().default(true),
     })
-    .default({}),
+    .prefault({}),
   enter: z.enum(["none", "pop", "slideUp"]).default("pop"),
 });
 
@@ -239,7 +239,7 @@ const captionTrackSchema = z.object({
       strokeColor: z.string().default("#000000"),
       uppercase: z.boolean().default(true),
     })
-    .default({}),
+    .prefault({}),
 });
 
 /** Hand-drawn circle / arrow pointing at part of the UI. */
@@ -326,7 +326,7 @@ const storyCardSchema = z.object({
       maxWidth: z.number().min(400).max(1000).default(880),
       align: z.enum(["left", "center"]).default("center"),
     })
-    .default({}),
+    .prefault({}),
   enter: z.enum(["fadeSlide", "none", "typewriter"]).default("fadeSlide"),
 });
 

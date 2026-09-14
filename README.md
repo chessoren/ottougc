@@ -10,6 +10,26 @@ landing page.
 
 ---
 
+## Built with Strands Agents
+
+Every creator, the manager, QA, the analyst and the weekly review are
+[Strands Agents](https://strandsagents.com) (`@strands-agents/sdk`, TypeScript).
+
+- **The loop is Strands.** `apps/web/src/server/agents/runtime.ts` builds a
+  Strands `Agent` per run: Gemini through Strands' `GoogleModel` on Vertex AI, the
+  role's tools as `FunctionTool`s (53 in `server/agents/tools`), and a turn limit.
+- **Hooks keep the trace.** `AfterModelCallEvent` and the tool callbacks write every
+  message, tool call and result to `agent_steps`, which the dashboard renders.
+- **Budget is enforced inside the loop.** A tool that would overspend cancels the
+  agent, and the run fails with the budget error.
+- **The single-shot writers are Strands too.** The brief, the ICP, the character
+  sheet and the scenario are tool-less Strands agents with a JSON response schema
+  (`server/llm/client.ts`).
+- **The agent only surfaces when a decision is needed.** It runs on a schedule and
+  publishing stays in dry run until a human turns it on.
+
+---
+
 ## Start in three commands
 
 ```bash
@@ -114,7 +134,7 @@ cast ten creators              write the scene against real brand material
 | `server/knowledge/prompting` | Closed vocabularies for framing, light, texture and performance, and the compiler that turns them into a prompt. The model never writes a prompt. |
 | `server/persona` | ICP and character sheet construction. A precondition of any generation. See [`docs/CHARACTER.md`](docs/CHARACTER.md). |
 | `server/onboarding` | Site crawler and brief builder. See [`docs/ONBOARDING.md`](docs/ONBOARDING.md). |
-| `server/agents` | Agent runtime, and the agents: manager, account, QA, analyst, weekly review. |
+| `server/agents` | The Strands Agents runtime, and the agents: manager, account, QA, analyst, weekly review. |
 | `server/agents/tools` | What the model can call: knowledge, memory, strategy, generation, **editing**, publishing, analytics. |
 | `server/edit` | The editing timeline: intermediate representation, validation, rule-based editor. |
 | `server/media` | Gemini Omni Flash for video, **Nano Banana 2** for stills, Lyria, Chirp — and the labelled stand-in provider. Imagen is not used: it is unavailable on the account and the Gemini image models refuse the endpoint the SDK's `generateImages` calls. |
@@ -138,21 +158,20 @@ Four decisions are explained in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
 
 ---
 
-## Running it on your own machine
+## Running it in production
 
-```bash
-pnpm desktop
-```
+`scripts/deploy.sh` deploys the worker to Cloud Run with Cloud SQL, and Cloud
+Scheduler keeps the fleet on its own clock: creators make the day's video at
+07:00, publishing runs every half hour, metrics hourly, the day is analysed at
+23:30 and the manager reviews the whole fleet on Monday morning.
 
-Builds the web app and opens it in a desktop shell that keeps the fleet on its
-own clock: creators make the day's video at 07:00, publishing runs every half
-hour, metrics hourly, the day is analysed at 23:30 and the manager reviews the
-whole fleet on Monday morning. Everything is also on the Fleet menu, by hand.
+The loop does not fit serverless functions — one Omni shot takes forty seconds, a
+render pins Chromium for minutes, and the media is hundreds of megabytes. See
+[`docs/RUNTIME.md`](docs/RUNTIME.md).
 
-The shell exists because the loop does not fit serverless — one Omni shot takes
-forty seconds, a render pins Chromium for minutes, and the media is hundreds of
-megabytes. See [`docs/RUNTIME.md`](docs/RUNTIME.md), which also explains the one
-rule it enforces: exactly one process owns the database.
+## License
+
+MIT — see [`LICENSE`](LICENSE).
 
 ## What's true today
 

@@ -1,34 +1,39 @@
 import "server-only";
 
+import {
+  Agent,
+  AfterModelCallEvent,
+  AfterToolCallEvent,
+  FunctionTool,
+  type JSONSchema,
+  type JSONValue,
+} from "@strands-agents/sdk";
 import { eq, gte, sql } from "drizzle-orm";
 
 import { env } from "@/lib/env";
 import { db } from "@/server/db";
 import { agentRuns, agentSteps, usageEvents } from "@/server/db/schema";
-import {
-  DEGRADED_MARKER,
-  estimateCostUsd,
-  getBrain,
-  type LlmMessage,
-  type LlmToolDef,
-} from "@/server/llm/client";
+import { estimateCostUsd, getBrain, strandsModel } from "@/server/llm/client";
 
 import { BudgetExceededError, type AgentKind, type AgentTool, type RunResult, type ToolContext } from "./types";
 
 /**
- * The agent loop.
+ * The agent loop, on the Strands Agents SDK.
  *
- * Deliberately small and boring: call the model, execute whatever tools it asks
- * for, feed the results back, repeat. Everything interesting lives in the tools.
+ * Strands owns the loop itself: call Gemini, execute whatever tools it asks
+ * for, feed the results back, repeat — including the Gemini 3 thought
+ * signatures that used to have to be replayed by hand. Everything interesting
+ * still lives in the tools; this file wires them in and keeps three properties:
  *
- * Three properties matter more than cleverness here:
  *   - **Every step is persisted.** `agent_steps` is an append-only trace of what
- *     the fleet decided and why. It is what the dashboard renders, and what makes
- *     "why did channel 4 publish that?" answerable three weeks later.
- *   - **Tool failures are fed back, not thrown.** A model that gets an error
- *     message can recover; a crashed run cannot.
- *   - **Budget is enforced inside the loop.** An agent cannot spend its way out
- *     of a bad plan.
+ *     the fleet decided and why. Strands hooks write the model's messages and
+ *     each tool call as they happen. It is what the dashboard renders, and what
+ *     makes "why did channel 4 publish that?" answerable three weeks later.
+ *   - **Tool failures are fed back, not thrown.** Strands turns a tool error
+ *     into an error result the model can recover from; a crashed run cannot.
+ *   - **Budget is enforced inside the loop.** A tool that would overspend
+ *     cancels the agent, and the run fails with the budget error. An agent
+ *     cannot spend its way out of a bad plan.
  */
 
 export interface RunOptions {
@@ -60,12 +65,11 @@ export interface RunOptions {
   usePipeline?: boolean;
 }
 
-/** A function response must be a JSON object, never a bare array or scalar. */
-function asResponse(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return { output: value };
+/** A tool result must be a JSON object, never a bare array or scalar. */
+function asResponse(value: unknown): JSONValue {
+  const json = JSON.parse(JSON.stringify(value ?? null)) as JSONValue;
+  if (json && typeof json === "object" && !Array.isArray(json)) return json;
+  return { output: json };
 }
 
 /** Mulberry32 — small, fast, seedable. */
@@ -206,116 +210,90 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
     }
   }
 
-  /* ---- Normal path -------------------------------------------------------- */
-  const toolMap = new Map((opts.tools ?? []).map((t) => [t.name, t]));
-  const toolDefs: LlmToolDef[] = (opts.tools ?? []).map((t) => ({
-    name: t.name,
-    description: t.description,
-    parameters: t.parameters,
-  }));
-
-  const messages: LlmMessage[] = [{ role: "user", text: opts.prompt }];
+  /* ---- Normal path: a Strands agent ------------------------------------- */
   let finalText = "";
+  let budgetError: BudgetExceededError | null = null;
+
+  const tools = (opts.tools ?? []).map(
+    (t) =>
+      new FunctionTool({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.parameters as JSONSchema,
+        callback: async (input, toolContext) => {
+          const args = (input ?? {}) as Record<string, unknown>;
+          const started = Date.now();
+          await step("TOOL_CALL", { tool: t.name, args });
+
+          try {
+            if (t.allowedFor?.length && !t.allowedFor.includes(opts.kind)) {
+              throw new Error(`A ${opts.kind} agent is not allowed to call ${t.name}.`);
+            }
+            const result = await t.handler(args as never, ctx);
+            await step("TOOL_RESULT", { tool: t.name, result, durationMs: Date.now() - started });
+            toolCalls.push({ name: t.name, args, result, isError: false });
+            return asResponse(result);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const errorResult = { error: message };
+            await step("TOOL_RESULT", {
+              tool: t.name,
+              result: errorResult,
+              isError: true,
+              durationMs: Date.now() - started,
+            });
+            toolCalls.push({ name: t.name, args, result: errorResult, isError: true });
+            // Budget exhaustion ends the run; anything else goes back to the
+            // model as an error result so it can adapt.
+            if (err instanceof BudgetExceededError) {
+              budgetError = err;
+              toolContext.agent instanceof Agent && toolContext.agent.cancel();
+            }
+            throw err;
+          }
+        },
+      }),
+  );
+
+  const agent = new Agent({
+    name: `ottougc-${opts.kind.toLowerCase().replace(/_/g, "-")}`,
+    model: strandsModel({ modelId: model, temperature: opts.temperature }),
+    systemPrompt: opts.system,
+    tools,
+    printer: false,
+    traceAttributes: { "ottougc.run_id": runId, "ottougc.brand_id": opts.brandId },
+  });
+
+  agent.addHook(AfterModelCallEvent, async (event) => {
+    const message = event.stopData?.message;
+    if (!message) return;
+    const text = textOf(message.content);
+    if (text) {
+      await step("MESSAGE", { content: text });
+      finalText = text;
+    }
+  });
+
+  // Tools the model invented never reach a callback; record them here.
+  agent.addHook(AfterToolCallEvent, async (event) => {
+    if (event.tool) return;
+    const errorResult = { error: `Unknown tool: ${event.toolUse.name}` };
+    await step("TOOL_CALL", { tool: event.toolUse.name, args: event.toolUse.input });
+    await step("TOOL_RESULT", { tool: event.toolUse.name, result: errorResult, isError: true });
+    toolCalls.push({ name: event.toolUse.name, args: event.toolUse.input, result: errorResult, isError: true });
+  });
 
   try {
-    for (let i = 0; i < maxSteps; i++) {
-      const res = await brain.generate({
-        model,
-        system: opts.system,
-        messages,
-        tools: toolDefs.length ? toolDefs : undefined,
-        temperature: opts.temperature,
-      });
+    const result = await agent.invoke(opts.prompt, { limits: { turns: maxSteps } });
 
-      inputTokens += res.usage.inputTokens;
-      outputTokens += res.usage.outputTokens;
-      costUsd += estimateCostUsd(model, res.usage.inputTokens, res.usage.outputTokens);
+    const usage = result.metrics?.accumulatedUsage;
+    inputTokens = usage?.inputTokens ?? 0;
+    outputTokens = usage?.outputTokens ?? 0;
+    costUsd = estimateCostUsd(model, inputTokens, outputTokens);
 
-      if (res.text && res.text !== DEGRADED_MARKER) {
-        await step("MESSAGE", { content: res.text });
-        finalText = res.text;
-      }
+    if (budgetError) throw budgetError;
 
-      if (res.functionCalls.length === 0) break;
-
-      // Replay the model's turn into the transcript so the next request has
-      // context — verbatim, because Gemini 3.x rejects a function call whose
-      // thought signature has been stripped by rebuilding it from name and args.
-      if (res.modelParts?.length) {
-        messages.push({ role: "model", parts: res.modelParts });
-      } else {
-        for (const call of res.functionCalls) {
-          messages.push({ role: "model", functionCall: { name: call.name, args: call.args } });
-        }
-      }
-
-      // Gemini requires the responses for a turn to come back as ONE user turn
-      // with exactly as many function-response parts as the turn had calls:
-      //
-      //   "Please ensure that the number of function response parts is equal to
-      //    the number of function call parts of the function call turn."
-      //
-      // So results are accumulated here and pushed once, rather than a message
-      // per tool.
-      const responseParts: unknown[] = [];
-
-      for (const call of res.functionCalls) {
-        const tool = toolMap.get(call.name);
-        const started = Date.now();
-        await step("TOOL_CALL", { tool: call.name, args: call.args });
-
-        if (!tool) {
-          const errorResult = { error: `Outil inconnu : ${call.name}` };
-          await step("TOOL_RESULT", {
-            tool: call.name,
-            result: errorResult,
-            isError: true,
-            durationMs: Date.now() - started,
-          });
-          responseParts.push({ functionResponse: { name: call.name, response: errorResult } });
-          toolCalls.push({ name: call.name, args: call.args, result: errorResult, isError: true });
-          continue;
-        }
-
-        if (tool.allowedFor?.length && !tool.allowedFor.includes(opts.kind)) {
-          const errorResult = {
-            error: `A ${opts.kind} agent is not allowed to call ${call.name}.`,
-          };
-          await step("TOOL_RESULT", { tool: call.name, result: errorResult, isError: true });
-          responseParts.push({ functionResponse: { name: call.name, response: errorResult } });
-          toolCalls.push({ name: call.name, args: call.args, result: errorResult, isError: true });
-          continue;
-        }
-
-        try {
-          const result = await tool.handler(call.args as never, ctx);
-          await step("TOOL_RESULT", {
-            tool: call.name,
-            result,
-            durationMs: Date.now() - started,
-          });
-          responseParts.push({ functionResponse: { name: call.name, response: asResponse(result) } });
-          toolCalls.push({ name: call.name, args: call.args, result, isError: false });
-        } catch (err) {
-          // Budget exhaustion ends the run; anything else is fed back so the
-          // model can adapt rather than the whole run dying.
-          if (err instanceof BudgetExceededError) throw err;
-          const message = err instanceof Error ? err.message : String(err);
-          const errorResult = { error: message };
-          await step("TOOL_RESULT", {
-            tool: call.name,
-            result: errorResult,
-            isError: true,
-            durationMs: Date.now() - started,
-          });
-          responseParts.push({ functionResponse: { name: call.name, response: errorResult } });
-          toolCalls.push({ name: call.name, args: call.args, result: errorResult, isError: true });
-        }
-      }
-
-      messages.push({ role: "user", parts: responseParts });
-    }
-
+    finalText = textOf(result.lastMessage.content) || finalText;
     const output = extractJson(finalText);
     await finish("SUCCEEDED", output, summarise(finalText));
     return {
@@ -358,6 +336,14 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
       })
       .where(eq(agentRuns.id, runId));
   }
+}
+
+/** The plain text of a message, without reasoning or tool blocks. */
+export function textOf(content: readonly unknown[]): string {
+  return (content as Array<{ type?: string; text?: string }>)
+    .flatMap((block) => (block.type === "textBlock" && block.text ? [block.text] : []))
+    .join("")
+    .trim();
 }
 
 /** Sum of today's internal generation cost across the whole service. */

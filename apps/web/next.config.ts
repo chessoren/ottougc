@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
     "@google-cloud/text-to-speech",
     "@google-cloud/speech",
     "@google/genai",
+    // Strands resolves its optional model providers (Bedrock, Anthropic, OpenAI)
+    // lazily; bundling it makes webpack chase peers this app never installs.
+    "@strands-agents/sdk",
     // Remotion's bundler pulls in a native rspack binding; letting webpack try to
     // parse a .node binary fails the build. These only ever run server-side.
     "@remotion/bundler",
